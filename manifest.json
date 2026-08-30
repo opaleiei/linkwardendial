@@ -14,7 +14,10 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "linkwarden-speeddial@local"
+      "id": "linkwarden-speeddial@local",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
     }
   }
 }
