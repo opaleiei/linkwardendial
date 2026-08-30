@@ -3,9 +3,8 @@ async function fetchAllBookmarks(linkwardenUrl, apiToken) {
   let cursor = null;
   let hasMore = true;
   let pageCount = 0;
-  const maxPages = 50; // Safety limit (fetches up to 5000 bookmarks)
+  const maxPages = 50;
 
-  // Try /api/v1/search first (current standard), fallback to /api/v1/links
   let endpoint = `${linkwardenUrl}/api/v1/search`;
 
   while (hasMore && pageCount < maxPages) {
@@ -24,7 +23,6 @@ async function fetchAllBookmarks(linkwardenUrl, apiToken) {
       }
     });
 
-    // Fallback to /api/v1/links if /api/v1/search returns 404
     if (!response.ok && endpoint.endsWith('/search') && pageCount === 1) {
       endpoint = `${linkwardenUrl}/api/v1/links`;
       response = await fetch(`${endpoint}?${params.toString()}`, {
@@ -44,7 +42,6 @@ async function fetchAllBookmarks(linkwardenUrl, apiToken) {
     let currentBatch = [];
     let nextCursor = null;
 
-    // Handle all potential response schemas across different Linkwarden versions
     if (json.data && Array.isArray(json.data.links)) {
       currentBatch = json.data.links;
       nextCursor = json.data.nextCursor;
@@ -79,7 +76,6 @@ async function fetchAllBookmarks(linkwardenUrl, apiToken) {
     }
   }
 
-  // Remove potential duplicates by ID or URL
   const seen = new Set();
   const uniqueLinks = [];
   for (const link of allLinks) {
@@ -90,18 +86,18 @@ async function fetchAllBookmarks(linkwardenUrl, apiToken) {
     }
   }
 
-  // Sort descending: newest / last added first
+  // Sort ascending: oldest / first added first
   uniqueLinks.sort((a, b) => {
     const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
     const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
 
     if (dateA && dateB && dateA !== dateB) {
-      return dateB - dateA;
+      return dateA - dateB;
     }
 
     const idA = Number(a.id) || 0;
     const idB = Number(b.id) || 0;
-    return idB - idA;
+    return idA - idB;
   });
 
   return uniqueLinks;
