@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Linkwarden Speed Dial",
+  "version": "1.0",
+  "description": "Displays Linkwarden bookmarks on your Firefox new tab page.",
+  "permissions": ["storage"],
+  "host_permissions": ["<all_urls>"],
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "linkwarden-speeddial@local"
+    }
+  }
+}

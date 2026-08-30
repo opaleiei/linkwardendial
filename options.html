@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Speed Dial Settings</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 20px; background: #1e1e2e; color: #cdd6f4; }
+    .field { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; }
+    input { width: 100%; max-width: 400px; padding: 8px; border-radius: 4px; border: 1px solid #45475a; background: #313244; color: #cdd6f4; }
+    button { padding: 8px 16px; border-radius: 4px; border: none; background: #89b4fa; color: #11111b; font-weight: bold; cursor: pointer; }
+    #status { margin-top: 10px; color: #a6e3a1; }
+  </style>
+</head>
+<body>
+  <h2>Linkwarden Speed Dial Settings</h2>
+  <div class="field">
+    <label for="serverUrl">Linkwarden Server URL:</label>
+    <input type="text" id="serverUrl" placeholder="https://linkwarden.yourdomain.com">
+  </div>
+  <div class="field">
+    <label for="apiToken">API Access Token:</label>
+    <input type="password" id="apiToken" placeholder="Paste your API Token">
+  </div>
+  <button id="save">Save Settings</button>
+  <div id="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>

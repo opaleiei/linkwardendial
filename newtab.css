@@ -1,0 +1,59 @@
+body {
+  margin: 0;
+  padding: 40px;
+  background-color: #11111b;
+  color: #cdd6f4;
+  font-family: system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.card {
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  color: #cdd6f4;
+  transition: transform 0.2s, border-color 0.2s, background-color 0.2s;
+  height: 120px;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  border-color: #89b4fa;
+  background: #1e1e2e;
+}
+
+.icon {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 12px;
+  object-fit: contain;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+}
+
+.hidden { display: none; }
+#message { text-align: center; font-size: 18px; margin-top: 50px; }
+#message a { color: #89b4fa; }
