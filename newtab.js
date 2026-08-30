@@ -3,48 +3,75 @@ async function fetchAllBookmarks(linkwardenUrl, apiToken) {
   let cursor = null;
   let hasMore = true;
   let pageCount = 0;
+  const maxPages = 50; // Safety limit (fetches up to 5000 bookmarks)
 
-  // Pagination loop to fetch all pages
-  while (hasMore && pageCount < 50) {
+  // Try /api/v1/search first (current standard), fallback to /api/v1/links
+  let endpoint = `${linkwardenUrl}/api/v1/search`;
+
+  while (hasMore && pageCount < maxPages) {
     pageCount++;
-    let url = `${linkwardenUrl}/api/v1/links`;
-    if (cursor !== null && cursor !== undefined) {
-      url += `?cursor=${cursor}`;
+
+    const params = new URLSearchParams();
+    params.append('limit', '100');
+    if (cursor !== null && cursor !== undefined && cursor !== '') {
+      params.append('cursor', cursor);
     }
 
-    const response = await fetch(url, {
+    let response = await fetch(`${endpoint}?${params.toString()}`, {
       headers: {
         'Authorization': `Bearer ${apiToken}`,
         'Content-Type': 'application/json'
       }
     });
 
+    // Fallback to /api/v1/links if /api/v1/search returns 404
+    if (!response.ok && endpoint.endsWith('/search') && pageCount === 1) {
+      endpoint = `${linkwardenUrl}/api/v1/links`;
+      response = await fetch(`${endpoint}?${params.toString()}`, {
+        headers: {
+          'Authorization': `Bearer ${apiToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+    }
+
     if (!response.ok) {
       throw new Error(`HTTP Error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const json = await response.json();
+
     let currentBatch = [];
     let nextCursor = null;
 
-    if (Array.isArray(data.response)) {
-      currentBatch = data.response;
-      nextCursor = data.nextCursor || null;
-    } else if (data.response && Array.isArray(data.response.links)) {
-      currentBatch = data.response.links;
-      nextCursor = data.response.nextCursor || null;
-    } else if (data.data && Array.isArray(data.data.links)) {
-      currentBatch = data.data.links;
-      nextCursor = data.data.nextCursor || null;
-    } else if (Array.isArray(data)) {
-      currentBatch = data;
+    // Handle all potential response schemas across different Linkwarden versions
+    if (json.data && Array.isArray(json.data.links)) {
+      currentBatch = json.data.links;
+      nextCursor = json.data.nextCursor;
+    } else if (json.response && Array.isArray(json.response.links)) {
+      currentBatch = json.response.links;
+      nextCursor = json.response.nextCursor;
+    } else if (Array.isArray(json.response)) {
+      currentBatch = json.response;
+      nextCursor = json.nextCursor ?? json.next_cursor;
+    } else if (Array.isArray(json.data)) {
+      currentBatch = json.data;
+      nextCursor = json.nextCursor ?? json.next_cursor;
+    } else if (Array.isArray(json)) {
+      currentBatch = json;
     }
 
-    if (currentBatch.length === 0) {
+    if (!currentBatch || currentBatch.length === 0) {
       hasMore = false;
     } else {
       allLinks.push(...currentBatch);
-      if (nextCursor && nextCursor !== cursor) {
+
+      if (
+        nextCursor !== null &&
+        nextCursor !== undefined &&
+        nextCursor !== '' &&
+        nextCursor !== cursor
+      ) {
         cursor = nextCursor;
       } else {
         hasMore = false;
@@ -52,13 +79,32 @@ async function fetchAllBookmarks(linkwardenUrl, apiToken) {
     }
   }
 
-  // Sort descending: highest ID or latest createdAt timestamp first
-  return allLinks.sort((a, b) => {
-    if (a.createdAt && b.createdAt) {
-      return new Date(b.createdAt) - new Date(a.createdAt);
+  // Remove potential duplicates by ID or URL
+  const seen = new Set();
+  const uniqueLinks = [];
+  for (const link of allLinks) {
+    const key = link.id || link.url;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueLinks.push(link);
     }
-    return (b.id || 0) - (a.id || 0);
+  }
+
+  // Sort descending: newest / last added first
+  uniqueLinks.sort((a, b) => {
+    const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+
+    if (dateA && dateB && dateA !== dateB) {
+      return dateB - dateA;
+    }
+
+    const idA = Number(a.id) || 0;
+    const idB = Number(b.id) || 0;
+    return idB - idA;
   });
+
+  return uniqueLinks;
 }
 
 async function fetchLinkwardenBookmarks() {
@@ -95,8 +141,13 @@ async function fetchLinkwardenBookmarks() {
       const icon = document.createElement('img');
       icon.className = 'icon';
 
-      const domain = new URL(item.url).hostname;
-      icon.src = item.favIcon || `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+      try {
+        const domain = new URL(item.url).hostname;
+        icon.src = item.favIcon || `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+      } catch (e) {
+        icon.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🌐</text></svg>';
+      }
+
       icon.onerror = () => {
         icon.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🌐</text></svg>';
       };
