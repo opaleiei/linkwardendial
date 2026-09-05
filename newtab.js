@@ -9,6 +9,7 @@ let currentConfig = {
   selectedCollectionId: null
 };
 
+let configCollection = null;
 let configCollectionId = null;
 let draggedCard = null;
 let isDragging = false;
@@ -32,6 +33,52 @@ function showSyncStatus(text, type = 'info', autoHide = true) {
   }
 }
 
+function serializeConfig(config) {
+  // Normalize order IDs (prefer number if integer, else string)
+  const normalizedOrder = (config.order || []).map(id => {
+    const num = Number(id);
+    return !isNaN(num) && num.toString() === String(id) ? num : String(id);
+  });
+
+  let compact = {
+    v: config.version || 1,
+    order: normalizedOrder,
+    t: config.updatedAt || Date.now(),
+    newTab: Boolean(config.openInNewTab),
+    colId: config.selectedCollectionId || null
+  };
+
+  let str = JSON.stringify(compact);
+  // Linkwarden description max length is 2048 chars
+  if (str.length <= 2040) {
+    return str;
+  }
+
+  // Trim lowest items in custom order if exceeding 2040 chars
+  while (str.length > 2040 && compact.order.length > 0) {
+    compact.order.pop();
+    str = JSON.stringify(compact);
+  }
+  return str;
+}
+
+function deserializeConfig(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {
+      version: parsed.version || parsed.v || 1,
+      order: parsed.order || parsed.o || [],
+      updatedAt: parsed.updatedAt || parsed.t || 0,
+      openInNewTab: parsed.openInNewTab ?? parsed.newTab ?? false,
+      selectedCollectionId: parsed.selectedCollectionId || parsed.colId || null
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 async function fetchCollections(linkwardenUrl, apiToken) {
   try {
     const res = await fetch(`${linkwardenUrl}/api/v1/collections`, {
@@ -40,7 +87,10 @@ async function fetchCollections(linkwardenUrl, apiToken) {
         'Content-Type': 'application/json'
       }
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.warn(`fetchCollections returned HTTP ${res.status}`);
+      return [];
+    }
     const json = await res.json();
     return json.response || json.data || (Array.isArray(json) ? json : []);
   } catch (err) {
@@ -49,7 +99,11 @@ async function fetchCollections(linkwardenUrl, apiToken) {
   }
 }
 
-async function getOrCreateConfigCollection(linkwardenUrl, apiToken, collections) {
+async function getOrCreateConfigCollection(linkwardenUrl, apiToken, collections = null) {
+  if (configCollection && configCollection.id && configCollection.name) {
+    return configCollection;
+  }
+
   if (!collections || collections.length === 0) {
     collections = await fetchCollections(linkwardenUrl, apiToken);
   }
@@ -61,10 +115,12 @@ async function getOrCreateConfigCollection(linkwardenUrl, apiToken, collections)
   );
 
   if (found) {
+    configCollection = found;
     configCollectionId = found.id;
     return found;
   }
 
+  // Create config collection in Linkwarden
   try {
     const res = await fetch(`${linkwardenUrl}/api/v1/collections`, {
       method: 'POST',
@@ -74,7 +130,7 @@ async function getOrCreateConfigCollection(linkwardenUrl, apiToken, collections)
       },
       body: JSON.stringify({
         name: CONFIG_COLLECTION_NAME,
-        description: JSON.stringify(currentConfig),
+        description: serializeConfig(currentConfig),
         color: '#89b4fa'
       })
     });
@@ -83,12 +139,16 @@ async function getOrCreateConfigCollection(linkwardenUrl, apiToken, collections)
       const json = await res.json();
       const created = json.response || json.data || json;
       if (created && created.id) {
+        configCollection = created;
         configCollectionId = created.id;
         return created;
       }
+    } else {
+      const errText = await res.text();
+      console.error(`Linkwarden POST collection failed (${res.status}):`, errText);
     }
   } catch (err) {
-    console.warn('Could not create config collection in Linkwarden:', err);
+    console.error('Could not create config collection in Linkwarden:', err);
   }
 
   return null;
@@ -97,31 +157,38 @@ async function getOrCreateConfigCollection(linkwardenUrl, apiToken, collections)
 async function loadConfigFromLinkwarden(linkwardenUrl, apiToken, collections) {
   const collection = await getOrCreateConfigCollection(linkwardenUrl, apiToken, collections);
   if (!collection || !collection.description) return null;
-
-  try {
-    const parsed = JSON.parse(collection.description);
-    if (parsed && typeof parsed === 'object') {
-      return parsed;
-    }
-  } catch (e) {
-    // Description wasn't JSON
-  }
-  return null;
+  return deserializeConfig(collection.description);
 }
 
 async function saveConfigToLinkwarden(linkwardenUrl, apiToken, config) {
   showSyncStatus('Saving to Linkwarden...', 'saving', false);
   try {
-    let collection = null;
-    if (configCollectionId) {
-      collection = { id: configCollectionId };
-    } else {
-      collection = await getOrCreateConfigCollection(linkwardenUrl, apiToken);
-    }
+    let collection = await getOrCreateConfigCollection(linkwardenUrl, apiToken);
 
     if (!collection || !collection.id) {
-      throw new Error('Config collection not available');
+      throw new Error('Config collection could not be found or created');
     }
+
+    // Prepare members according to Linkwarden UpdateCollectionSchema:
+    // members must be an array of { userId: number, canCreate: boolean, canUpdate: boolean, canDelete: boolean }
+    const members = Array.isArray(collection.members)
+      ? collection.members
+          .filter(m => m && (m.userId || m.user?.id || m.id))
+          .map(m => ({
+            userId: Number(m.userId || m.user?.id || m.id),
+            canCreate: Boolean(m.canCreate),
+            canUpdate: Boolean(m.canUpdate),
+            canDelete: Boolean(m.canDelete)
+          }))
+      : [];
+
+    const payload = {
+      id: Number(collection.id),
+      name: String(collection.name || CONFIG_COLLECTION_NAME).trim(),
+      description: serializeConfig(config),
+      color: collection.color || '#89b4fa',
+      members: members
+    };
 
     const res = await fetch(`${linkwardenUrl}/api/v1/collections/${collection.id}`, {
       method: 'PUT',
@@ -129,16 +196,21 @@ async function saveConfigToLinkwarden(linkwardenUrl, apiToken, config) {
         'Authorization': `Bearer ${apiToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        name: CONFIG_COLLECTION_NAME,
-        description: JSON.stringify(config),
-        color: '#89b4fa'
-      })
+      body: JSON.stringify(payload)
     });
 
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
+      const errText = await res.text();
+      console.error(`Linkwarden PUT collection failed (${res.status}):`, errText);
+      throw new Error(`HTTP ${res.status}: ${errText}`);
     }
+
+    try {
+      const json = await res.json();
+      if (json && json.response) {
+        configCollection = { ...configCollection, ...json.response };
+      }
+    } catch (_) {}
 
     showSyncStatus('Synced to Linkwarden ✓', 'success', true);
   } catch (err) {
@@ -231,7 +303,9 @@ async function fetchAllBookmarks(linkwardenUrl, apiToken, selectedCollectionId =
   // Exclude any link that might belong to the config collection itself
   const filteredLinks = allLinks.filter(link => {
     if (configCollectionId && link.collectionId === configCollectionId) return false;
-    if (link.collection && link.collection.name === CONFIG_COLLECTION_NAME) return false;
+    if (link.collection && (link.collection.name === CONFIG_COLLECTION_NAME || link.collection.id === configCollectionId)) {
+      return false;
+    }
     return true;
   });
 
@@ -250,7 +324,7 @@ async function fetchAllBookmarks(linkwardenUrl, apiToken, selectedCollectionId =
 
 function applyCustomOrder(links, order) {
   if (!order || !Array.isArray(order) || order.length === 0) {
-    // Default fallback: oldest first
+    // Default sort: oldest first
     return links.slice().sort((a, b) => {
       const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -363,7 +437,6 @@ function attachDragEvents(card) {
     isDragging = true;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', card.dataset.id);
-    // Delay adding dragging style slightly so drag ghost keeps normal look
     setTimeout(() => {
       if (draggedCard === card) {
         card.classList.add('dragging');
@@ -413,7 +486,6 @@ function attachDragEvents(card) {
       c.classList.remove('drag-over-left', 'drag-over-right');
     });
     draggedCard = null;
-    // Suppress click immediately following drag
     setTimeout(() => {
       isDragging = false;
     }, 150);
@@ -445,7 +517,17 @@ function handleOrderRearranged() {
   // 2. Debounce sync to Linkwarden (avoids hammering API while user drags multiple items)
   if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
   saveDebounceTimer = setTimeout(async () => {
-    const { linkwardenUrl, apiToken } = await browser.storage.sync.get(['linkwardenUrl', 'apiToken']);
+    const { linkwardenUrl, apiToken, syncToLinkwarden } = await browser.storage.sync.get([
+      'linkwardenUrl', 
+      'apiToken',
+      'syncToLinkwarden'
+    ]);
+
+    if (syncToLinkwarden === false) {
+      showSyncStatus('Saved locally', 'info', true);
+      return;
+    }
+
     if (linkwardenUrl && apiToken) {
       await saveConfigToLinkwarden(linkwardenUrl, apiToken, currentConfig);
     }

@@ -129,6 +129,43 @@ document.getElementById('save').addEventListener('click', async () => {
   // Clear cached bookmarks so next tab open will fetch fresh data with any new collection filter
   await browser.storage.local.remove(['cachedLinks']);
 
+  // Ensure config collection exists in Linkwarden if sync is enabled
+  if (syncToLinkwarden && url && token) {
+    try {
+      const collectionsRes = await fetch(`${url}/api/v1/collections`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (collectionsRes.ok) {
+        const json = await collectionsRes.json();
+        const collections = json.response || json.data || (Array.isArray(json) ? json : []);
+        const found = collections.find(c => 
+          c.name === CONFIG_COLLECTION_NAME || 
+          c.name.toLowerCase() === 'speed dial config' ||
+          c.name.toLowerCase() === '⚙️ speed dial config'
+        );
+        if (!found) {
+          await fetch(`${url}/api/v1/collections`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              name: CONFIG_COLLECTION_NAME,
+              description: JSON.stringify({ v: 1, order: [], t: Date.now() }),
+              color: '#89b4fa'
+            })
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to ensure config collection during save:', e);
+    }
+  }
+
   showStatus('Settings saved successfully!', 'success');
 });
 
@@ -165,7 +202,18 @@ document.getElementById('reset-order').addEventListener('click', async () => {
           c.name.toLowerCase() === '⚙️ speed dial config'
         );
         if (found) {
-          const updatedConfig = { version: 1, order: [], updatedAt: Date.now() };
+          const members = Array.isArray(found.members)
+            ? found.members
+                .filter(m => m && (m.userId || m.user?.id || m.id))
+                .map(m => ({
+                  userId: Number(m.userId || m.user?.id || m.id),
+                  canCreate: Boolean(m.canCreate),
+                  canUpdate: Boolean(m.canUpdate),
+                  canDelete: Boolean(m.canDelete)
+                }))
+            : [];
+
+          const updatedConfig = { v: 1, order: [], t: Date.now() };
           await fetch(`${linkwardenUrl}/api/v1/collections/${found.id}`, {
             method: 'PUT',
             headers: {
@@ -173,9 +221,11 @@ document.getElementById('reset-order').addEventListener('click', async () => {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              name: found.name || CONFIG_COLLECTION_NAME,
+              id: Number(found.id),
+              name: String(found.name || CONFIG_COLLECTION_NAME).trim(),
               description: JSON.stringify(updatedConfig),
-              color: found.color || '#89b4fa'
+              color: found.color || '#89b4fa',
+              members: members
             })
           });
         }
