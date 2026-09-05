@@ -1,29 +1,199 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>Speed Dial Settings</title>
   <style>
-    body { font-family: system-ui, sans-serif; padding: 20px; background: #1e1e2e; color: #cdd6f4; }
-    .field { margin-bottom: 15px; }
-    label { display: block; margin-bottom: 5px; font-weight: bold; }
-    input { width: 100%; max-width: 400px; padding: 8px; border-radius: 4px; border: 1px solid #45475a; background: #313244; color: #cdd6f4; }
-    button { padding: 8px 16px; border-radius: 4px; border: none; background: #89b4fa; color: #11111b; font-weight: bold; cursor: pointer; }
-    #status { margin-top: 10px; color: #a6e3a1; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 30px;
+      background: #1e1e2e;
+      color: #cdd6f4;
+      max-width: 520px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+    h2 {
+      margin-top: 0;
+      margin-bottom: 24px;
+      color: #89b4fa;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .card-box {
+      background: #181825;
+      border: 1px solid #313244;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .field {
+      margin-bottom: 18px;
+    }
+    .field:last-child {
+      margin-bottom: 0;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+      font-size: 13px;
+      color: #bac2de;
+    }
+    input[type="text"],
+    input[type="password"],
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 6px;
+      border: 1px solid #45475a;
+      background: #313244;
+      color: #cdd6f4;
+      box-sizing: border-box;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    select:focus {
+      outline: none;
+      border-color: #89b4fa;
+    }
+    .hint {
+      font-size: 12px;
+      color: #a6adc8;
+      margin-top: 4px;
+    }
+    .checkbox-field {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      cursor: pointer;
+    }
+    .checkbox-field input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #89b4fa;
+      cursor: pointer;
+    }
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 15px;
+      flex-wrap: wrap;
+    }
+    button {
+      padding: 9px 18px;
+      border-radius: 6px;
+      border: none;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      transition: opacity 0.2s, background-color 0.2s;
+    }
+    button.primary {
+      background: #89b4fa;
+      color: #11111b;
+    }
+    button.primary:hover {
+      opacity: 0.9;
+    }
+    button.secondary {
+      background: #313244;
+      color: #cdd6f4;
+      border: 1px solid #45475a;
+    }
+    button.secondary:hover {
+      background: #45475a;
+    }
+    button.danger {
+      background: transparent;
+      color: #f38ba8;
+      border: 1px solid #f38ba8;
+    }
+    button.danger:hover {
+      background: rgba(243, 139, 168, 0.15);
+    }
+    #status {
+      margin-top: 15px;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      display: none;
+    }
+    #status.success {
+      display: block;
+      background: rgba(166, 227, 161, 0.15);
+      color: #a6e3a1;
+      border: 1px solid #a6e3a1;
+    }
+    #status.error {
+      display: block;
+      background: rgba(243, 139, 168, 0.15);
+      color: #f38ba8;
+      border: 1px solid #f38ba8;
+    }
+    #status.info {
+      display: block;
+      background: rgba(137, 180, 250, 0.15);
+      color: #89b4fa;
+      border: 1px solid #89b4fa;
+    }
   </style>
 </head>
 <body>
-  <h2>Linkwarden Speed Dial Settings</h2>
-  <div class="field">
-    <label for="serverUrl">Linkwarden Server URL:</label>
-    <input type="text" id="serverUrl" placeholder="https://linkwarden.yourdomain.com">
+  <h2>⚙️ Linkwarden Speed Dial Settings</h2>
+
+  <div class="card-box">
+    <div class="field">
+      <label for="serverUrl">Linkwarden Server URL:</label>
+      <input type="text" id="serverUrl" placeholder="https://linkwarden.yourdomain.com">
+      <div class="hint">The base URL of your Linkwarden instance.</div>
+    </div>
+    <div class="field">
+      <label for="apiToken">API Access Token:</label>
+      <input type="password" id="apiToken" placeholder="Paste your Access Token">
+      <div class="hint">Generate this under Linkwarden &rarr; Settings &rarr; Access Tokens.</div>
+    </div>
+    <div class="btn-row">
+      <button type="button" id="test-connection" class="secondary">Test Connection</button>
+    </div>
   </div>
-  <div class="field">
-    <label for="apiToken">API Access Token:</label>
-    <input type="password" id="apiToken" placeholder="Paste your API Token">
+
+  <div class="card-box">
+    <div class="field">
+      <label for="collectionSelect">Display Collection:</label>
+      <select id="collectionSelect">
+        <option value="">All Bookmarks (Default)</option>
+      </select>
+      <div class="hint">Choose which collection to show on your speed dial.</div>
+    </div>
+
+    <div class="checkbox-field">
+      <input type="checkbox" id="openInNewTab">
+      <label for="openInNewTab" style="margin: 0; font-weight: normal; cursor: pointer;">
+        Open bookmarks in a new tab
+      </label>
+    </div>
+
+    <div class="checkbox-field">
+      <input type="checkbox" id="syncToLinkwarden" checked>
+      <label for="syncToLinkwarden" style="margin: 0; font-weight: normal; cursor: pointer;">
+        Sync dial arrangement & config to Linkwarden (saved in <code>⚙️ Speed Dial Config</code> collection)
+      </label>
+    </div>
   </div>
-  <button id="save">Save Settings</button>
+
+  <div class="btn-row">
+    <button id="save" class="primary">Save Settings</button>
+    <button id="reset-order" class="danger">Reset Dial Order</button>
+  </div>
+
   <div id="status"></div>
+
   <script src="options.js"></script>
 </body>
 </html>
