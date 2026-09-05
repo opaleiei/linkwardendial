@@ -1,4 +1,8 @@
 const CONFIG_COLLECTION_NAME = '⚙️ Speed Dial Config';
+const DEFAULT_BG_COLOR = '#11111b';
+
+let uploadedImageData = null;
+let shouldClearBgImage = false;
 
 function showStatus(text, type = 'success') {
   const status = document.getElementById('status');
@@ -59,23 +63,113 @@ async function loadCollections(linkwardenUrl, apiToken, currentSelectedId = null
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const data = await browser.storage.sync.get([
+  // Load sync settings
+  const syncData = await browser.storage.sync.get([
     'linkwardenUrl',
     'apiToken',
     'selectedCollectionId',
     'openInNewTab',
-    'syncToLinkwarden'
+    'syncToLinkwarden',
+    'backgroundColor',
+    'bgImageUrl'
   ]);
 
-  if (data.linkwardenUrl) document.getElementById('serverUrl').value = data.linkwardenUrl;
-  if (data.apiToken) document.getElementById('apiToken').value = data.apiToken;
-  if (data.openInNewTab !== undefined) document.getElementById('openInNewTab').checked = data.openInNewTab;
-  if (data.syncToLinkwarden !== undefined) {
-    document.getElementById('syncToLinkwarden').checked = data.syncToLinkwarden;
+  // Load local settings (especially uploaded background image)
+  const localData = await browser.storage.local.get([
+    'backgroundColor',
+    'bgImageUrl',
+    'bgImageData'
+  ]);
+
+  if (syncData.linkwardenUrl) document.getElementById('serverUrl').value = syncData.linkwardenUrl;
+  if (syncData.apiToken) document.getElementById('apiToken').value = syncData.apiToken;
+  if (syncData.openInNewTab !== undefined) document.getElementById('openInNewTab').checked = syncData.openInNewTab;
+  if (syncData.syncToLinkwarden !== undefined) {
+    document.getElementById('syncToLinkwarden').checked = syncData.syncToLinkwarden;
   }
 
-  if (data.linkwardenUrl && data.apiToken) {
-    await loadCollections(data.linkwardenUrl, data.apiToken, data.selectedCollectionId);
+  // Appearance & Background
+  const savedBgColor = localData.backgroundColor || syncData.backgroundColor || DEFAULT_BG_COLOR;
+  document.getElementById('bgColorPicker').value = savedBgColor;
+  document.getElementById('bgColorText').value = savedBgColor;
+
+  const savedBgUrl = localData.bgImageUrl || syncData.bgImageUrl || '';
+  document.getElementById('bgImageUrl').value = savedBgUrl;
+
+  const clearBtnRow = document.getElementById('clearBgImageRow');
+  const fileStatus = document.getElementById('bgImageFileStatus');
+
+  if (localData.bgImageData) {
+    uploadedImageData = localData.bgImageData;
+    fileStatus.textContent = '✓ Custom uploaded image is active';
+    clearBtnRow.style.display = 'block';
+  } else if (savedBgUrl) {
+    clearBtnRow.style.display = 'block';
+  }
+
+  if (syncData.linkwardenUrl && syncData.apiToken) {
+    await loadCollections(syncData.linkwardenUrl, syncData.apiToken, syncData.selectedCollectionId);
+  }
+});
+
+// Color picker & text input synchronization
+const bgColorPicker = document.getElementById('bgColorPicker');
+const bgColorText = document.getElementById('bgColorText');
+
+bgColorPicker.addEventListener('input', () => {
+  bgColorText.value = bgColorPicker.value;
+});
+
+bgColorText.addEventListener('input', () => {
+  const val = bgColorText.value.trim();
+  if (/^#([0-9A-Fa-f]{3}){1,2}$/.test(val)) {
+    bgColorPicker.value = val;
+  }
+});
+
+document.getElementById('resetBgColor').addEventListener('click', () => {
+  bgColorPicker.value = DEFAULT_BG_COLOR;
+  bgColorText.value = DEFAULT_BG_COLOR;
+});
+
+// Background image file upload
+document.getElementById('bgImageFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  if (file.size > 8 * 1024 * 1024) {
+    showStatus('Image file is too large (max 8MB).', 'error');
+    e.target.value = '';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    uploadedImageData = reader.result;
+    shouldClearBgImage = false;
+    document.getElementById('bgImageFileStatus').textContent = `✓ Loaded "${file.name}" (${Math.round(file.size / 1024)} KB)`;
+    document.getElementById('clearBgImageRow').style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+});
+
+// Remove background image
+document.getElementById('clearBgImage').addEventListener('click', () => {
+  uploadedImageData = null;
+  shouldClearBgImage = true;
+  document.getElementById('bgImageUrl').value = '';
+  document.getElementById('bgImageFile').value = '';
+  document.getElementById('bgImageFileStatus').textContent = '';
+  document.getElementById('clearBgImageRow').style.display = 'none';
+});
+
+document.getElementById('bgImageUrl').addEventListener('input', () => {
+  const url = document.getElementById('bgImageUrl').value.trim();
+  const clearBtnRow = document.getElementById('clearBgImageRow');
+  if (url || uploadedImageData) {
+    clearBtnRow.style.display = 'block';
+  } else {
+    clearBtnRow.style.display = 'none';
   }
 });
 
@@ -114,17 +208,38 @@ document.getElementById('save').addEventListener('click', async () => {
   const openInNewTab = document.getElementById('openInNewTab').checked;
   const syncToLinkwarden = document.getElementById('syncToLinkwarden').checked;
 
+  const bgColor = document.getElementById('bgColorText').value.trim() || document.getElementById('bgColorPicker').value || DEFAULT_BG_COLOR;
+  const bgImageUrl = document.getElementById('bgImageUrl').value.trim();
+
   if (url.endsWith('/')) {
     url = url.slice(0, -1);
   }
 
+  // 1. Save general settings to sync
   await browser.storage.sync.set({
     linkwardenUrl: url,
     apiToken: token,
     selectedCollectionId,
     openInNewTab,
-    syncToLinkwarden
+    syncToLinkwarden,
+    backgroundColor: bgColor,
+    bgImageUrl: bgImageUrl
   });
+
+  // 2. Save background to local storage (safe for large image data URLs)
+  const localUpdates = {
+    backgroundColor: bgColor,
+    bgImageUrl: bgImageUrl
+  };
+
+  if (shouldClearBgImage) {
+    await browser.storage.local.remove(['bgImageData', 'bgImageUrl']);
+    shouldClearBgImage = false;
+  } else if (uploadedImageData) {
+    localUpdates.bgImageData = uploadedImageData;
+  }
+
+  await browser.storage.local.set(localUpdates);
 
   // Clear cached bookmarks so next tab open will fetch fresh data with any new collection filter
   await browser.storage.local.remove(['cachedLinks']);

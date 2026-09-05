@@ -15,6 +15,28 @@ let draggedCard = null;
 let isDragging = false;
 let saveDebounceTimer = null;
 let statusTimeout = null;
+let activeDropdown = null;
+
+// Apply custom background color / image immediately
+async function applyBackground() {
+  try {
+    const data = await browser.storage.local.get(['backgroundColor', 'bgImageUrl', 'bgImageData']);
+    if (data.backgroundColor) {
+      document.body.style.backgroundColor = data.backgroundColor;
+    }
+    if (data.bgImageData) {
+      document.body.style.backgroundImage = `url("${data.bgImageData}")`;
+    } else if (data.bgImageUrl) {
+      document.body.style.backgroundImage = `url("${data.bgImageUrl}")`;
+    } else {
+      document.body.style.backgroundImage = 'none';
+    }
+  } catch (err) {
+    console.warn('Failed to load background settings:', err);
+  }
+}
+
+applyBackground();
 
 function showSyncStatus(text, type = 'info', autoHide = true) {
   const el = document.getElementById('sync-status');
@@ -375,6 +397,137 @@ function applyCustomOrder(links, order) {
   return [...ordered, ...remaining];
 }
 
+function closeAllDropdowns() {
+  document.querySelectorAll('.card-dropdown.open').forEach(d => {
+    d.classList.remove('open');
+  });
+  activeDropdown = null;
+}
+
+function toggleCardDropdown(dropdown) {
+  const isOpen = dropdown.classList.contains('open');
+  closeAllDropdowns();
+  if (!isOpen) {
+    dropdown.classList.add('open');
+    activeDropdown = dropdown;
+  }
+}
+
+// Close dropdowns when clicking outside
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.card-menu-btn') && !e.target.closest('.card-dropdown')) {
+    closeAllDropdowns();
+  }
+});
+
+function confirmDeleteBookmark(item, cardEl) {
+  document.querySelector('.delete-overlay')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'delete-overlay';
+
+  const name = item.name || item.url;
+  overlay.innerHTML = `
+    <div class="delete-dialog">
+      <h3>Delete Bookmark</h3>
+      <p>Are you sure you want to delete <strong id="delete-name"></strong> from Linkwarden? This action cannot be undone.</p>
+      <div class="dialog-btns">
+        <button class="btn-cancel" type="button">Cancel</button>
+        <button class="btn-delete" type="button">Delete</button>
+      </div>
+    </div>
+  `;
+
+  overlay.querySelector('#delete-name').textContent = name;
+
+  overlay.querySelector('.btn-cancel').addEventListener('click', () => {
+    overlay.remove();
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+
+  overlay.querySelector('.btn-delete').addEventListener('click', async () => {
+    overlay.remove();
+    await executeDeleteBookmark(item, cardEl);
+  });
+
+  document.body.appendChild(overlay);
+}
+
+async function executeDeleteBookmark(item, cardEl) {
+  showSyncStatus('Deleting bookmark from Linkwarden...', 'saving', false);
+
+  const { linkwardenUrl, apiToken } = await browser.storage.sync.get(['linkwardenUrl', 'apiToken']);
+  if (!linkwardenUrl || !apiToken) {
+    showSyncStatus('Failed: Credentials not configured', 'error', true);
+    return;
+  }
+
+  const linkId = item.id;
+  if (!linkId) {
+    showSyncStatus('Failed: Bookmark ID not found', 'error', true);
+    return;
+  }
+
+  try {
+    const res = await fetch(`${linkwardenUrl}/api/v1/links/${linkId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`HTTP ${res.status}: ${errText}`);
+    }
+
+    // Smooth removal animation
+    cardEl.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+    cardEl.style.opacity = '0';
+    cardEl.style.transform = 'scale(0.8)';
+    setTimeout(() => {
+      cardEl.remove();
+      const gridEl = document.getElementById('grid');
+      if (!gridEl || gridEl.children.length === 0) {
+        const messageEl = document.getElementById('message');
+        messageEl.textContent = 'No bookmarks found in Linkwarden.';
+        messageEl.classList.remove('hidden');
+      }
+    }, 250);
+
+    // Update in-memory links
+    const key = String(item.id || item.url);
+    currentLinks = currentLinks.filter(l => String(l.id || l.url) !== key);
+
+    // Update order
+    currentConfig.order = currentConfig.order.filter(id => String(id) !== String(item.id) && String(id) !== String(item.url));
+    currentConfig.updatedAt = Date.now();
+
+    // Update cached links and order in local storage
+    const localData = await browser.storage.local.get(['cachedLinks']);
+    if (Array.isArray(localData.cachedLinks)) {
+      const updatedCache = localData.cachedLinks.filter(l => String(l.id || l.url) !== key);
+      await browser.storage.local.set({
+        cachedLinks: updatedCache,
+        cachedSpeedDialConfig: currentConfig,
+        cachedSpeedDialOrder: currentConfig.order
+      });
+    }
+
+    // Persist updated order to Linkwarden
+    await saveConfigToLinkwarden(linkwardenUrl, apiToken, currentConfig);
+
+    showSyncStatus('Bookmark deleted from Linkwarden ✓', 'success', true);
+  } catch (err) {
+    console.error('Failed to delete bookmark:', err);
+    showSyncStatus(`Failed to delete bookmark (${err.message})`, 'error', true);
+  }
+}
+
 function renderGrid(links, openInNewTab = false) {
   const gridEl = document.getElementById('grid');
   const messageEl = document.getElementById('message');
@@ -425,6 +578,52 @@ function renderGrid(links, openInNewTab = false) {
     card.appendChild(icon);
     card.appendChild(title);
 
+    // 3-dot context menu button
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'card-menu-btn';
+    menuBtn.type = 'button';
+    menuBtn.title = 'Bookmark options';
+    menuBtn.setAttribute('aria-label', 'Bookmark options');
+    menuBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <circle cx="12" cy="5" r="2"/>
+        <circle cx="12" cy="12" r="2"/>
+        <circle cx="12" cy="19" r="2"/>
+      </svg>
+    `;
+
+    // Dropdown popup
+    const dropdown = document.createElement('div');
+    dropdown.className = 'card-dropdown';
+    dropdown.innerHTML = `
+      <button class="card-dropdown-item danger" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"></polyline>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          <line x1="10" y1="11" x2="10" y2="17"></line>
+          <line x1="14" y1="11" x2="14" y2="17"></line>
+        </svg>
+        <span>Delete bookmark</span>
+      </button>
+    `;
+
+    menuBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleCardDropdown(dropdown);
+    });
+
+    const deleteBtn = dropdown.querySelector('.card-dropdown-item.danger');
+    deleteBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeAllDropdowns();
+      confirmDeleteBookmark(item, card);
+    });
+
+    card.appendChild(menuBtn);
+    card.appendChild(dropdown);
+
     attachDragEvents(card);
 
     gridEl.appendChild(card);
@@ -433,6 +632,12 @@ function renderGrid(links, openInNewTab = false) {
 
 function attachDragEvents(card) {
   card.addEventListener('dragstart', (e) => {
+    // If dragging starts from menu button or dropdown, abort
+    if (e.target.closest('.card-menu-btn') || e.target.closest('.card-dropdown')) {
+      e.preventDefault();
+      return;
+    }
+    closeAllDropdowns();
     draggedCard = card;
     isDragging = true;
     e.dataTransfer.effectAllowed = 'move';
@@ -492,7 +697,8 @@ function attachDragEvents(card) {
   });
 
   card.addEventListener('click', (e) => {
-    if (isDragging) {
+    // Suppress navigation if clicked on menu button, dropdown, or after dragging
+    if (isDragging || e.target.closest('.card-menu-btn') || e.target.closest('.card-dropdown')) {
       e.preventDefault();
       e.stopPropagation();
       return false;

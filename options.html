@@ -28,6 +28,15 @@
       padding: 20px;
       margin-bottom: 20px;
     }
+    .card-box-title {
+      margin-top: 0;
+      margin-bottom: 14px;
+      font-size: 14px;
+      color: #89b4fa;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
     .field {
       margin-bottom: 18px;
     }
@@ -142,12 +151,28 @@
       color: #89b4fa;
       border: 1px solid #89b4fa;
     }
+    .color-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .color-preview {
+      width: 42px;
+      height: 38px;
+      padding: 2px;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      cursor: pointer;
+      background: #313244;
+      box-sizing: border-box;
+    }
   </style>
 </head>
 <body>
   <h2>⚙️ Linkwarden Speed Dial Settings</h2>
 
   <div class="card-box">
+    <div class="card-box-title">🔗 Connection</div>
     <div class="field">
       <label for="serverUrl">Linkwarden Server URL:</label>
       <input type="text" id="serverUrl" placeholder="https://linkwarden.yourdomain.com">
@@ -164,6 +189,36 @@
   </div>
 
   <div class="card-box">
+    <div class="card-box-title">🎨 Appearance & Background</div>
+    <div class="field">
+      <label for="bgColorPicker">Background Color:</label>
+      <div class="color-row">
+        <input type="color" id="bgColorPicker" class="color-preview" value="#11111b">
+        <input type="text" id="bgColorText" placeholder="#11111b" style="width: 120px;">
+        <button type="button" id="resetBgColor" class="secondary" style="padding: 7px 12px; font-size: 12px;">Reset</button>
+      </div>
+      <div class="hint">Pick a color or type a hex code (default: #11111b).</div>
+    </div>
+
+    <div class="field">
+      <label for="bgImageUrl">Background Image URL:</label>
+      <input type="text" id="bgImageUrl" placeholder="https://example.com/wallpaper.jpg">
+      <div class="hint">Direct link to an online wallpaper (HTTPS).</div>
+    </div>
+
+    <div class="field">
+      <label for="bgImageFile">Or Upload Local Image:</label>
+      <input type="file" id="bgImageFile" accept="image/*" style="padding: 6px; font-size: 12px;">
+      <div id="bgImageFileStatus" class="hint" style="margin-top: 4px; color: #a6e3a1;"></div>
+    </div>
+
+    <div id="clearBgImageRow" style="margin-top: 10px; display: none;">
+      <button type="button" id="clearBgImage" class="danger" style="padding: 6px 14px; font-size: 12px;">Remove Background Image</button>
+    </div>
+  </div>
+
+  <div class="card-box">
+    <div class="card-box-title">📑 Bookmarks & Sync</div>
     <div class="field">
       <label for="collectionSelect">Display Collection:</label>
       <select id="collectionSelect">
