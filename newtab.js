@@ -15,7 +15,14 @@ let draggedCard = null;
 let isDragging = false;
 let saveDebounceTimer = null;
 let statusTimeout = null;
-let activeDropdown = null;
+
+// Map of id/url -> bookmark item for O(1) lookups during delegated events
+const itemMap = new Map();
+
+// Single shared dropdown in document.body
+let sharedMenu = null;
+let activeMenuItem = null;
+let activeMenuCard = null;
 
 // Apply custom background color / image immediately
 async function applyBackground() {
@@ -56,7 +63,6 @@ function showSyncStatus(text, type = 'info', autoHide = true) {
 }
 
 function serializeConfig(config) {
-  // Normalize order IDs (prefer number if integer, else string)
   const normalizedOrder = (config.order || []).map(id => {
     const num = Number(id);
     return !isNaN(num) && num.toString() === String(id) ? num : String(id);
@@ -71,12 +77,10 @@ function serializeConfig(config) {
   };
 
   let str = JSON.stringify(compact);
-  // Linkwarden description max length is 2048 chars
   if (str.length <= 2040) {
     return str;
   }
 
-  // Trim lowest items in custom order if exceeding 2040 chars
   while (str.length > 2040 && compact.order.length > 0) {
     compact.order.pop();
     str = JSON.stringify(compact);
@@ -142,7 +146,6 @@ async function getOrCreateConfigCollection(linkwardenUrl, apiToken, collections 
     return found;
   }
 
-  // Create config collection in Linkwarden
   try {
     const res = await fetch(`${linkwardenUrl}/api/v1/collections`, {
       method: 'POST',
@@ -191,8 +194,6 @@ async function saveConfigToLinkwarden(linkwardenUrl, apiToken, config) {
       throw new Error('Config collection could not be found or created');
     }
 
-    // Prepare members according to Linkwarden UpdateCollectionSchema:
-    // members must be an array of { userId: number, canCreate: boolean, canUpdate: boolean, canDelete: boolean }
     const members = Array.isArray(collection.members)
       ? collection.members
           .filter(m => m && (m.userId || m.user?.id || m.id))
@@ -322,7 +323,6 @@ async function fetchAllBookmarks(linkwardenUrl, apiToken, selectedCollectionId =
     }
   }
 
-  // Exclude any link that might belong to the config collection itself
   const filteredLinks = allLinks.filter(link => {
     if (configCollectionId && link.collectionId === configCollectionId) return false;
     if (link.collection && (link.collection.name === CONFIG_COLLECTION_NAME || link.collection.id === configCollectionId)) {
@@ -346,7 +346,6 @@ async function fetchAllBookmarks(linkwardenUrl, apiToken, selectedCollectionId =
 
 function applyCustomOrder(links, order) {
   if (!order || !Array.isArray(order) || order.length === 0) {
-    // Default sort: oldest first
     return links.slice().sort((a, b) => {
       const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -364,7 +363,6 @@ function applyCustomOrder(links, order) {
   const ordered = [];
   const addedKeys = new Set();
 
-  // 1. Add bookmarks in saved order
   for (const item of order) {
     const key = String(item);
     if (map.has(key)) {
@@ -377,7 +375,6 @@ function applyCustomOrder(links, order) {
     }
   }
 
-  // 2. Append any new bookmarks that aren't yet in saved order
   const remaining = [];
   for (const link of links) {
     const uniqueId = String(link.id || link.url);
@@ -397,28 +394,75 @@ function applyCustomOrder(links, order) {
   return [...ordered, ...remaining];
 }
 
-function closeAllDropdowns() {
-  document.querySelectorAll('.card-dropdown.open').forEach(d => {
-    d.classList.remove('open');
+// ── Single Shared Dropdown Implementation ──
+function getOrCreateSharedMenu() {
+  if (sharedMenu) return sharedMenu;
+
+  sharedMenu = document.createElement('div');
+  sharedMenu.className = 'card-dropdown';
+  sharedMenu.innerHTML = `
+    <button class="card-dropdown-item danger" type="button">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+        <line x1="10" y1="11" x2="10" y2="17"></line>
+        <line x1="14" y1="11" x2="14" y2="17"></line>
+      </svg>
+      <span>Delete bookmark</span>
+    </button>
+  `;
+
+  sharedMenu.querySelector('.card-dropdown-item.danger').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const item = activeMenuItem;
+    const card = activeMenuCard;
+    closeSharedMenu();
+    if (item && card) {
+      confirmDeleteBookmark(item, card);
+    }
   });
-  activeDropdown = null;
+
+  document.body.appendChild(sharedMenu);
+  return sharedMenu;
 }
 
-function toggleCardDropdown(dropdown) {
-  const isOpen = dropdown.classList.contains('open');
-  closeAllDropdowns();
-  if (!isOpen) {
-    dropdown.classList.add('open');
-    activeDropdown = dropdown;
+function openSharedMenu(buttonEl, item, cardEl) {
+  const menu = getOrCreateSharedMenu();
+
+  if (activeMenuCard === cardEl && menu.classList.contains('open')) {
+    closeSharedMenu();
+    return;
   }
+
+  activeMenuItem = item;
+  activeMenuCard = cardEl;
+
+  const rect = buttonEl.getBoundingClientRect();
+  const top = Math.max(10, rect.top - 42);
+  const left = Math.max(10, rect.right - 145);
+
+  menu.style.top = `${top}px`;
+  menu.style.left = `${left}px`;
+  menu.classList.add('open');
 }
 
-// Close dropdowns when clicking outside
+function closeSharedMenu() {
+  if (sharedMenu) {
+    sharedMenu.classList.remove('open');
+  }
+  activeMenuItem = null;
+  activeMenuCard = null;
+}
+
+// Global dismiss handlers for shared menu
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.card-menu-btn') && !e.target.closest('.card-dropdown')) {
-    closeAllDropdowns();
+    closeSharedMenu();
   }
 });
+
+window.addEventListener('scroll', closeSharedMenu, { passive: true });
 
 function confirmDeleteBookmark(item, cardEl) {
   document.querySelector('.delete-overlay')?.remove();
@@ -485,8 +529,7 @@ async function executeDeleteBookmark(item, cardEl) {
       throw new Error(`HTTP ${res.status}: ${errText}`);
     }
 
-    // Smooth removal animation
-    cardEl.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+    cardEl.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
     cardEl.style.opacity = '0';
     cardEl.style.transform = 'scale(0.8)';
     setTimeout(() => {
@@ -497,17 +540,15 @@ async function executeDeleteBookmark(item, cardEl) {
         messageEl.textContent = 'No bookmarks found in Linkwarden.';
         messageEl.classList.remove('hidden');
       }
-    }, 250);
+    }, 200);
 
-    // Update in-memory links
     const key = String(item.id || item.url);
+    itemMap.delete(key);
     currentLinks = currentLinks.filter(l => String(l.id || l.url) !== key);
 
-    // Update order
     currentConfig.order = currentConfig.order.filter(id => String(id) !== String(item.id) && String(id) !== String(item.url));
     currentConfig.updatedAt = Date.now();
 
-    // Update cached links and order in local storage
     const localData = await browser.storage.local.get(['cachedLinks']);
     if (Array.isArray(localData.cachedLinks)) {
       const updatedCache = localData.cachedLinks.filter(l => String(l.id || l.url) !== key);
@@ -518,7 +559,6 @@ async function executeDeleteBookmark(item, cardEl) {
       });
     }
 
-    // Persist updated order to Linkwarden
     await saveConfigToLinkwarden(linkwardenUrl, apiToken, currentConfig);
 
     showSyncStatus('Bookmark deleted from Linkwarden ✓', 'success', true);
@@ -528,26 +568,34 @@ async function executeDeleteBookmark(item, cardEl) {
   }
 }
 
+// ── Optimized DOM Rendering with DocumentFragment & Lazy Favicons ──
 function renderGrid(links, openInNewTab = false) {
   const gridEl = document.getElementById('grid');
   const messageEl = document.getElementById('message');
 
+  closeSharedMenu();
+  itemMap.clear();
+
   if (!links || links.length === 0) {
-    gridEl.innerHTML = '';
+    gridEl.replaceChildren();
     messageEl.textContent = 'No bookmarks found in Linkwarden.';
     messageEl.classList.remove('hidden');
     return;
   }
 
   messageEl.classList.add('hidden');
-  gridEl.innerHTML = '';
+  const fragment = document.createDocumentFragment();
 
-  links.forEach(item => {
+  for (let i = 0; i < links.length; i++) {
+    const item = links[i];
+    const idKey = String(item.id || item.url);
+    itemMap.set(idKey, item);
+
     const card = document.createElement('a');
     card.className = 'card';
     card.href = item.url;
     card.draggable = true;
-    card.dataset.id = String(item.id || item.url);
+    card.dataset.id = idKey;
     card.title = item.name ? `${item.name}\n${item.url}` : item.url;
 
     if (openInNewTab) {
@@ -558,6 +606,7 @@ function renderGrid(links, openInNewTab = false) {
     const icon = document.createElement('img');
     icon.className = 'icon';
     icon.alt = '';
+    icon.loading = 'lazy';
 
     try {
       const domain = new URL(item.url).hostname;
@@ -575,73 +624,44 @@ function renderGrid(links, openInNewTab = false) {
     title.className = 'title';
     title.textContent = item.name || item.url;
 
-    card.appendChild(icon);
-    card.appendChild(title);
-
-    // 3-dot context menu button
     const menuBtn = document.createElement('button');
     menuBtn.className = 'card-menu-btn';
     menuBtn.type = 'button';
     menuBtn.title = 'Bookmark options';
     menuBtn.setAttribute('aria-label', 'Bookmark options');
-    menuBtn.innerHTML = `
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-        <circle cx="12" cy="5" r="2"/>
-        <circle cx="12" cy="12" r="2"/>
-        <circle cx="12" cy="19" r="2"/>
-      </svg>
-    `;
+    menuBtn.textContent = '⋮';
 
-    // Dropdown popup
-    const dropdown = document.createElement('div');
-    dropdown.className = 'card-dropdown';
-    dropdown.innerHTML = `
-      <button class="card-dropdown-item danger" type="button">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="3 6 5 6 21 6"></polyline>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          <line x1="10" y1="11" x2="10" y2="17"></line>
-          <line x1="14" y1="11" x2="14" y2="17"></line>
-        </svg>
-        <span>Delete bookmark</span>
-      </button>
-    `;
-
-    menuBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      toggleCardDropdown(dropdown);
-    });
-
-    const deleteBtn = dropdown.querySelector('.card-dropdown-item.danger');
-    deleteBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      closeAllDropdowns();
-      confirmDeleteBookmark(item, card);
-    });
-
+    card.appendChild(icon);
+    card.appendChild(title);
     card.appendChild(menuBtn);
-    card.appendChild(dropdown);
 
-    attachDragEvents(card);
+    fragment.appendChild(card);
+  }
 
-    gridEl.appendChild(card);
-  });
+  gridEl.replaceChildren(fragment);
 }
 
-function attachDragEvents(card) {
-  card.addEventListener('dragstart', (e) => {
-    // If dragging starts from menu button or dropdown, abort
-    if (e.target.closest('.card-menu-btn') || e.target.closest('.card-dropdown')) {
+// ── Event Delegation for Grid (Zero per-card listeners) ──
+function setupGridDelegation() {
+  const gridEl = document.getElementById('grid');
+  if (!gridEl || gridEl.dataset.delegated) return;
+  gridEl.dataset.delegated = 'true';
+
+  gridEl.addEventListener('dragstart', (e) => {
+    if (e.target.closest('.card-menu-btn')) {
       e.preventDefault();
       return;
     }
-    closeAllDropdowns();
+    closeSharedMenu();
+
+    const card = e.target.closest('.card');
+    if (!card) return;
+
     draggedCard = card;
     isDragging = true;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', card.dataset.id);
+
     setTimeout(() => {
       if (draggedCard === card) {
         card.classList.add('dragging');
@@ -649,10 +669,13 @@ function attachDragEvents(card) {
     }, 0);
   });
 
-  card.addEventListener('dragover', (e) => {
+  gridEl.addEventListener('dragover', (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    if (!draggedCard || draggedCard === card) return;
+    if (!draggedCard) return;
+
+    const card = e.target.closest('.card');
+    if (!card || card === draggedCard) return;
 
     const rect = card.getBoundingClientRect();
     const midX = rect.left + rect.width / 2;
@@ -662,43 +685,69 @@ function attachDragEvents(card) {
     card.classList.toggle('drag-over-right', !isLeft);
   });
 
-  card.addEventListener('dragleave', () => {
-    card.classList.remove('drag-over-left', 'drag-over-right');
-  });
-
-  card.addEventListener('drop', (e) => {
-    e.preventDefault();
-    card.classList.remove('drag-over-left', 'drag-over-right');
-    if (!draggedCard || draggedCard === card) return;
-
-    const gridEl = document.getElementById('grid');
-    const rect = card.getBoundingClientRect();
-    const midX = rect.left + rect.width / 2;
-    const isLeft = e.clientX < midX;
-
-    if (isLeft) {
-      gridEl.insertBefore(draggedCard, card);
-    } else {
-      gridEl.insertBefore(draggedCard, card.nextSibling);
+  gridEl.addEventListener('dragleave', (e) => {
+    const card = e.target.closest('.card');
+    if (card) {
+      card.classList.remove('drag-over-left', 'drag-over-right');
     }
-
-    handleOrderRearranged();
   });
 
-  card.addEventListener('dragend', () => {
-    card.classList.remove('dragging');
-    document.querySelectorAll('.card').forEach(c => {
-      c.classList.remove('drag-over-left', 'drag-over-right');
-    });
+  gridEl.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (!draggedCard) return;
+
+    const card = e.target.closest('.card');
+    if (card) {
+      card.classList.remove('drag-over-left', 'drag-over-right');
+      if (card !== draggedCard) {
+        const rect = card.getBoundingClientRect();
+        const midX = rect.left + rect.width / 2;
+        const isLeft = e.clientX < midX;
+
+        if (isLeft) {
+          gridEl.insertBefore(draggedCard, card);
+        } else {
+          gridEl.insertBefore(draggedCard, card.nextSibling);
+        }
+
+        handleOrderRearranged();
+      }
+    }
+  });
+
+  gridEl.addEventListener('dragend', () => {
+    if (draggedCard) {
+      draggedCard.classList.remove('dragging');
+    }
+    const indicators = gridEl.querySelectorAll('.drag-over-left, .drag-over-right');
+    for (let i = 0; i < indicators.length; i++) {
+      indicators[i].classList.remove('drag-over-left', 'drag-over-right');
+    }
     draggedCard = null;
     setTimeout(() => {
       isDragging = false;
     }, 150);
   });
 
-  card.addEventListener('click', (e) => {
-    // Suppress navigation if clicked on menu button, dropdown, or after dragging
-    if (isDragging || e.target.closest('.card-menu-btn') || e.target.closest('.card-dropdown')) {
+  gridEl.addEventListener('click', (e) => {
+    const menuBtn = e.target.closest('.card-menu-btn');
+    if (menuBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = menuBtn.closest('.card');
+      if (card) {
+        const item = itemMap.get(card.dataset.id);
+        if (item) {
+          openSharedMenu(menuBtn, item, card);
+        }
+      }
+      return false;
+    }
+
+    const card = e.target.closest('.card');
+    if (!card) return;
+
+    if (isDragging) {
       e.preventDefault();
       e.stopPropagation();
       return false;
@@ -714,13 +763,11 @@ function handleOrderRearranged() {
   currentConfig.order = newOrder;
   currentConfig.updatedAt = Date.now();
 
-  // 1. Immediately persist to local storage for zero latency
   browser.storage.local.set({
     cachedSpeedDialConfig: currentConfig,
     cachedSpeedDialOrder: newOrder
   });
 
-  // 2. Debounce sync to Linkwarden (avoids hammering API while user drags multiple items)
   if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
   saveDebounceTimer = setTimeout(async () => {
     const { linkwardenUrl, apiToken, syncToLinkwarden } = await browser.storage.sync.get([
@@ -749,6 +796,8 @@ async function initSpeedDial() {
       browser.runtime.openOptionsPage();
     });
   }
+
+  setupGridDelegation();
 
   // 1. Check local cache for instant paint
   const localData = await browser.storage.local.get(['cachedLinks', 'cachedSpeedDialConfig', 'cachedSpeedDialOrder']);
@@ -790,7 +839,6 @@ async function initSpeedDial() {
     const remoteConfig = await loadConfigFromLinkwarden(linkwardenUrl, apiToken, collections);
 
     if (remoteConfig) {
-      // Merge remote config if remote is newer or local is empty
       if (!currentConfig.updatedAt || (remoteConfig.updatedAt && remoteConfig.updatedAt >= currentConfig.updatedAt)) {
         currentConfig = { ...currentConfig, ...remoteConfig };
         if (remoteConfig.openInNewTab !== undefined) {
