@@ -1,3 +1,5 @@
+100% Vibe coded using free tier Google Antigravity
+
 # Linkwarden Speed Dial for Firefox
 
 A modern, fast, and customizable Speed Dial new tab extension for Firefox powered by your self-hosted or cloud [Linkwarden](https://linkwarden.app) instance.
