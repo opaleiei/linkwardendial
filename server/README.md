@@ -58,9 +58,11 @@ docker run -d \
 
 ---
 
-## Web Dashboard
+## Web Dashboard, Backup & Import
 
-Visit `http://localhost:3000` in your web browser to view the built-in Catppuccin web dashboard with live bookmark counts, connection guide, and a one-click **"Download JSON Backup"** button (`/api/v1/export`).
+Visit `http://localhost:3000` in your web browser to view the built-in Catppuccin web dashboard:
+- **📥 Download JSON Backup**: Click "Download JSON Backup" (`/api/v1/export`) to save your entire bookmark database and dial arrangement to a file.
+- **📤 Import Backup**: Click "Import Backup" (`POST /api/v1/import`) and select any previously exported `linkwarden-bookmarks-backup.json` (or `db.json`) file to restore all bookmarks and collections with one click!
 
 ---
 
@@ -79,4 +81,4 @@ Visit `http://localhost:3000` in your web browser to view the built-in Catppucci
 All bookmarks and dial settings are saved cleanly in a single human-readable JSON file:
 `./data/db.json`.
 
-You can backup, inspect, or copy this file anywhere!
+You can backup, inspect, restore, or copy this file anywhere!

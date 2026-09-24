@@ -68,7 +68,7 @@ function parseBody(req) {
     let body = '';
     req.on('data', chunk => {
       body += chunk;
-      if (body.length > 5 * 1024 * 1024) {
+      if (body.length > 50 * 1024 * 1024) { // Allow up to 50MB for large bookmark imports
         req.destroy();
       }
     });
@@ -107,10 +107,82 @@ async function fetchPageTitle(targetUrl) {
   }
 }
 
+// Helper: import and normalize backup data
+function importBackupData(payload) {
+  let importedCollections = [];
+  let importedLinks = [];
+
+  // Case 1: Standard Mini-Linkwarden backup / db.json
+  if (payload && Array.isArray(payload.collections) && Array.isArray(payload.links)) {
+    importedCollections = payload.collections;
+    importedLinks = payload.links;
+  }
+  // Case 2: Array of links or official Linkwarden links export
+  else if (Array.isArray(payload)) {
+    importedLinks = payload;
+  } else if (payload && Array.isArray(payload.links)) {
+    importedLinks = payload.links;
+    if (Array.isArray(payload.collections)) importedCollections = payload.collections;
+  } else if (payload && Array.isArray(payload.response)) {
+    importedLinks = payload.response;
+  } else if (payload && payload.response && Array.isArray(payload.response.links)) {
+    importedLinks = payload.response.links;
+  }
+
+  // Ensure default collection exists
+  if (importedCollections.length === 0) {
+    importedCollections = [
+      {
+        id: 1,
+        name: 'Unorganized',
+        description: '',
+        color: '#89b4fa',
+        members: [{ userId: 1, canCreate: true, canUpdate: true, canDelete: true }]
+      }
+    ];
+  }
+
+  // Normalize links
+  let linkIdCounter = 1;
+  const normalizedLinks = importedLinks.map((item, idx) => {
+    const linkId = typeof item.id === 'number' ? item.id : linkIdCounter++;
+    const targetUrl = item.url || '';
+    let domain = '';
+    try {
+      if (targetUrl) domain = new URL(targetUrl).hostname;
+    } catch (_) {}
+
+    return {
+      id: linkId,
+      name: item.name || item.title || targetUrl || `Bookmark ${idx + 1}`,
+      url: targetUrl,
+      description: item.description || '',
+      type: item.type || 'url',
+      favIcon: item.favIcon || (domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null),
+      collectionId: item.collectionId || (item.collection && item.collection.id) || 1,
+      createdAt: item.createdAt || new Date().toISOString(),
+      updatedAt: item.updatedAt || new Date().toISOString()
+    };
+  }).filter(l => Boolean(l.url));
+
+  // Determine next IDs
+  const maxLinkId = normalizedLinks.reduce((max, l) => Math.max(max, l.id || 0), 0);
+  const maxColId = importedCollections.reduce((max, c) => Math.max(max, c.id || 0), 0);
+
+  db.collections = importedCollections;
+  db.links = normalizedLinks;
+  db.nextLinkId = maxLinkId + 1;
+  db.nextCollectionId = maxColId + 1;
+
+  saveDb();
+  console.log(`[Mini-Linkwarden] Imported ${db.links.length} bookmarks and ${db.collections.length} collections.`);
+  return { linksCount: db.links.length, collectionsCount: db.collections.length };
+}
+
 // Dashboard HTML generator
 function renderDashboardHtml(host) {
   const linksHtml = db.links.length === 0
-    ? '<p style="color: #6c7086; font-style: italic;">No bookmarks saved yet. Use the Linkwarden Speed Dial extension to add bookmarks!</p>'
+    ? '<p style="color: #6c7086; font-style: italic;">No bookmarks saved yet. Use the Linkwarden Speed Dial extension or click Import Backup below to get started!</p>'
     : db.links.map(l => `
       <div style="background: #181825; border: 1px solid #313244; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
         <div style="display: flex; align-items: center; gap: 12px; overflow: hidden;">
@@ -209,20 +281,43 @@ function renderDashboardHtml(host) {
       font-size: 13px;
       color: #f5c2e7;
     }
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
     .btn {
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       background: #89b4fa;
       color: #11111b;
-      padding: 8px 16px;
+      padding: 9px 18px;
       border-radius: 6px;
       text-decoration: none;
       font-weight: 600;
       font-size: 13px;
       cursor: pointer;
       border: none;
+      transition: opacity 0.2s;
     }
     .btn:hover {
       opacity: 0.9;
+    }
+    .btn.secondary {
+      background: #313244;
+      color: #cdd6f4;
+      border: 1px solid #45475a;
+    }
+    .btn.secondary:hover {
+      background: #45475a;
+    }
+    #importStatus {
+      margin-top: 12px;
+      font-size: 13px;
+      font-weight: 500;
+      display: none;
     }
   </style>
 </head>
@@ -234,20 +329,25 @@ function renderDashboardHtml(host) {
     </div>
 
     <div class="card">
-      <h2>📊 Server Stats</h2>
+      <h2>📊 Server Stats & Backup</h2>
       <div class="stats">
         <div class="stat-box">
-          <div class="stat-number">${db.links.length}</div>
+          <div class="stat-number" id="stats-links">${db.links.length}</div>
           <div class="stat-label">Saved Bookmarks</div>
         </div>
         <div class="stat-box">
-          <div class="stat-number">${db.collections.length}</div>
+          <div class="stat-number" id="stats-collections">${db.collections.length}</div>
           <div class="stat-label">Collections</div>
         </div>
       </div>
-      <div style="display: flex; gap: 10px; align-items: center;">
+      <div class="btn-row">
         <a href="/api/v1/export" class="btn" download>📥 Download JSON Backup</a>
+        <label class="btn secondary" style="cursor: pointer; margin: 0;">
+          📤 Import Backup
+          <input type="file" id="importFileInput" accept=".json,application/json" style="display: none;">
+        </label>
       </div>
+      <div id="importStatus"></div>
     </div>
 
     <div class="card">
@@ -265,9 +365,55 @@ function renderDashboardHtml(host) {
 
     <div class="card">
       <h2>🔖 Bookmarks (${db.links.length})</h2>
-      ${linksHtml}
+      <div id="bookmarks-list">
+        ${linksHtml}
+      </div>
     </div>
   </div>
+
+  <script>
+    document.getElementById('importFileInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      if (!confirm('Are you sure you want to import "' + file.name + '"? This will load the bookmarks and collections from the backup.')) {
+        e.target.value = '';
+        return;
+      }
+
+      const statusEl = document.getElementById('importStatus');
+      statusEl.style.display = 'block';
+      statusEl.style.color = '#89b4fa';
+      statusEl.textContent = '⏳ Importing backup...';
+
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+
+        const res = await fetch('/api/v1/import', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ${API_TOKEN ? `'Authorization': 'Bearer ${API_TOKEN}'` : "'' : ''"}
+          },
+          body: JSON.stringify(data)
+        });
+
+        const json = await res.json();
+        if (res.ok) {
+          statusEl.style.color = '#a6e3a1';
+          statusEl.textContent = '✓ ' + (json.response || 'Backup imported successfully!') + ' Reloading dashboard...';
+          setTimeout(() => window.location.reload(), 1000);
+        } else {
+          statusEl.style.color = '#f38ba8';
+          statusEl.textContent = '❌ Error: ' + (json.response || 'Failed to import backup');
+        }
+      } catch (err) {
+        statusEl.style.color = '#f38ba8';
+        statusEl.textContent = '❌ Error reading file: ' + err.message;
+      }
+    });
+  </script>
 </body>
 </html>`;
 }
@@ -332,7 +478,28 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify(db, null, 2));
   }
 
-  // 3. Collections endpoints
+  // 3. Import database / restore backup
+  if (pathname === '/api/v1/import' && method === 'POST') {
+    const body = await parseBody(req);
+    if (!body || (typeof body !== 'object')) {
+      return sendJson(res, 400, { response: 'Invalid JSON payload for import' });
+    }
+
+    try {
+      const stats = importBackupData(body);
+      return sendJson(res, 200, {
+        response: `Successfully imported ${stats.linksCount} bookmarks and ${stats.collectionsCount} collections.`,
+        status: 200,
+        linksCount: stats.linksCount,
+        collectionsCount: stats.collectionsCount
+      });
+    } catch (err) {
+      console.error('[Mini-Linkwarden] Import error:', err);
+      return sendJson(res, 500, { response: `Import failed: ${err.message}` });
+    }
+  }
+
+  // 4. Collections endpoints
   // GET /api/v1/collections
   if (pathname === '/api/v1/collections' && method === 'GET') {
     return sendJson(res, 200, { response: db.collections });
@@ -388,7 +555,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { response: removed });
   }
 
-  // 4. Search / Links listing endpoints
+  // 5. Search / Links listing endpoints
   // GET /api/v1/search OR GET /api/v1/links
   if ((pathname === '/api/v1/search' || pathname === '/api/v1/links') && method === 'GET') {
     const colParam = reqUrl.searchParams.get('collectionId');
@@ -407,7 +574,7 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // 5. Create Bookmark
+  // 6. Create Bookmark
   // POST /api/v1/links
   if (pathname === '/api/v1/links' && method === 'POST') {
     const body = await parseBody(req);
@@ -455,7 +622,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { response: newLink, status: 200 });
   }
 
-  // 6. Delete Bookmark
+  // 7. Delete Bookmark
   // DELETE /api/v1/links/:id
   const deleteLinkMatch = pathname.match(/^\/api\/v1\/links\/(\d+)$/);
   if (deleteLinkMatch && method === 'DELETE') {
