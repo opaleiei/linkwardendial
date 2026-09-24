@@ -32,6 +32,21 @@ A modern, fast, and customizable Speed Dial new tab extension for Firefox powere
    - Click **"Save Settings"**.
 4. Open a new tab (`Ctrl+T`) and enjoy your Linkwarden Speed Dial!
 
+## Mini-Linkwarden Docker Backend (Optional Alternative)
+
+Don't want to run the full Linkwarden suite? A lightweight, zero-dependency backend is included in `server/` that mimics Linkwarden's bookmark and collection endpoints:
+
+1. Start the mini-server with Docker Compose:
+   ```bash
+   docker compose up -d
+   ```
+2. In the extension Options:
+   - **Server URL**: `http://localhost:3000`
+   - **API Access Token**: `mysecrettoken` (configured in `docker-compose.yml`)
+3. All bookmarks, collections, and custom dial arrangements are saved to `./data/db.json`.
+
+See [server/README.md](server/README.md) for more details.
+
 ## Development & Handover
 
 For developers or AI agents picking up this project, see [HANDOVER.md](HANDOVER.md) for full architecture notes, Linkwarden API quirks, and testing guidelines.

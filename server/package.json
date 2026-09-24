@@ -1,0 +1,13 @@
+{
+  "name": "mini-linkwarden",
+  "version": "1.0.0",
+  "description": "Lightweight bookmark-focused Linkwarden-compatible API server for Linkwarden Speed Dial",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["linkwarden", "bookmarks", "speed-dial"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {}
+}

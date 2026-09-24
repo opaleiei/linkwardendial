@@ -1,0 +1,14 @@
+services:
+  mini-linkwarden:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: mini-linkwarden
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/data
+    environment:
+      - PORT=3000
+      - API_TOKEN=mysecrettoken

@@ -25,7 +25,9 @@ This document provides complete architectural and operational context for any de
 | `newtab.js` | Core new tab logic: instant cache painting, event delegation on `#grid`, shared context menu, drag-and-drop reordering, direct Linkwarden bookmark creation & deletion, bidirectional cloud config sync. |
 | `options.html` | Options page UI: credentials & connection tester, dial size selector, max columns selector, background color picker + hex input, wallpaper URL / file upload, collection filter, default sort, and order reset. |
 | `options.js` | Options logic: loads and saves settings to `browser.storage.sync` and `browser.storage.local`, validates Linkwarden credentials via `/api/v1/collections`. |
-| `.gitignore` | Excludes `*.zip`, `.DS_Store`, and `Thumbs.db`. |
+| `docker-compose.yml` | Docker compose manifest to run Mini-Linkwarden standalone bookmark server on port 3000. |
+| `server/` | Lightweight Linkwarden-compatible bookmark backend (Node.js, Dockerfile, atomic `db.json` storage). |
+| `.gitignore` | Excludes `*.zip`, `.DS_Store`, `Thumbs.db`, and `data/`. |
 | `README.md` | User-facing documentation and setup guide. |
 | `HANDOVER.md` | This continuation document. |
 
