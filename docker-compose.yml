@@ -1,9 +1,6 @@
 services:
   mini-linkwarden:
     image: ghcr.io/opaleiei/linkwardendial:latest
-    build:
-      context: ./server
-      dockerfile: Dockerfile
     container_name: mini-linkwarden
     restart: unless-stopped
     ports:
