@@ -1,12 +1,16 @@
 const CONFIG_COLLECTION_NAME = '⚙️ Speed Dial Config';
 
 let currentLinks = [];
+let currentCollections = [];
 let currentConfig = {
   version: 1,
   order: [],
   updatedAt: 0,
   openInNewTab: false,
-  selectedCollectionId: null
+  selectedCollectionId: null,
+  dialSize: 'medium',
+  maxColumns: 'unlimited',
+  defaultSort: 'newest_last'
 };
 
 let configCollection = null;
@@ -45,6 +49,20 @@ async function applyBackground() {
 
 applyBackground();
 
+// Apply layout styles (dial size, max columns)
+function applyLayoutSettings(dialSize = 'medium', maxColumns = 'unlimited') {
+  document.body.classList.remove('size-small', 'size-medium', 'size-large');
+  document.body.classList.add(`size-${dialSize || 'medium'}`);
+
+  const gridEl = document.getElementById('grid');
+  if (gridEl) {
+    // Remove existing column classes
+    gridEl.className = gridEl.className.replace(/\bcols-\S+/g, '').trim();
+    const colClass = (maxColumns && maxColumns !== 'unlimited') ? `cols-${maxColumns}` : 'cols-unlimited';
+    gridEl.classList.add(colClass);
+  }
+}
+
 function showSyncStatus(text, type = 'info', autoHide = true) {
   const el = document.getElementById('sync-status');
   if (!el) return;
@@ -73,7 +91,10 @@ function serializeConfig(config) {
     order: normalizedOrder,
     t: config.updatedAt || Date.now(),
     newTab: Boolean(config.openInNewTab),
-    colId: config.selectedCollectionId || null
+    colId: config.selectedCollectionId || null,
+    dialSize: config.dialSize || 'medium',
+    maxColumns: config.maxColumns || 'unlimited',
+    defaultSort: config.defaultSort || 'newest_last'
   };
 
   let str = JSON.stringify(compact);
@@ -98,7 +119,10 @@ function deserializeConfig(raw) {
       order: parsed.order || parsed.o || [],
       updatedAt: parsed.updatedAt || parsed.t || 0,
       openInNewTab: parsed.openInNewTab ?? parsed.newTab ?? false,
-      selectedCollectionId: parsed.selectedCollectionId || parsed.colId || null
+      selectedCollectionId: parsed.selectedCollectionId || parsed.colId || null,
+      dialSize: parsed.dialSize || 'medium',
+      maxColumns: parsed.maxColumns || 'unlimited',
+      defaultSort: parsed.defaultSort || 'newest_last'
     };
   } catch (e) {
     return null;
@@ -344,14 +368,22 @@ async function fetchAllBookmarks(linkwardenUrl, apiToken, selectedCollectionId =
   return uniqueLinks;
 }
 
-function applyCustomOrder(links, order) {
+function applyCustomOrder(links, order, defaultSort = 'newest_last') {
+  const isNewestFirst = defaultSort === 'newest_first';
+
+  const defaultSortComparator = (a, b) => {
+    const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    if (dateA && dateB && dateA !== dateB) {
+      return isNewestFirst ? dateB - dateA : dateA - dateB;
+    }
+    const idA = Number(a.id) || 0;
+    const idB = Number(b.id) || 0;
+    return isNewestFirst ? idB - idA : idA - idB;
+  };
+
   if (!order || !Array.isArray(order) || order.length === 0) {
-    return links.slice().sort((a, b) => {
-      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      if (dateA && dateB && dateA !== dateB) return dateA - dateB;
-      return (Number(a.id) || 0) - (Number(b.id) || 0);
-    });
+    return links.slice().sort(defaultSortComparator);
   }
 
   const map = new Map();
@@ -384,14 +416,10 @@ function applyCustomOrder(links, order) {
     }
   }
 
-  remaining.sort((a, b) => {
-    const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-    const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    if (dateA && dateB && dateA !== dateB) return dateA - dateB;
-    return (Number(a.id) || 0) - (Number(b.id) || 0);
-  });
+  remaining.sort(defaultSortComparator);
 
-  return [...ordered, ...remaining];
+  // If newest dials first is preferred, new unarranged bookmarks appear at the top!
+  return isNewestFirst ? [...remaining, ...ordered] : [...ordered, ...remaining];
 }
 
 // ── Single Shared Dropdown Implementation ──
@@ -455,7 +483,6 @@ function closeSharedMenu() {
   activeMenuCard = null;
 }
 
-// Global dismiss handlers for shared menu
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.card-menu-btn') && !e.target.closest('.card-dropdown')) {
     closeSharedMenu();
@@ -566,6 +593,144 @@ async function executeDeleteBookmark(item, cardEl) {
     console.error('Failed to delete bookmark:', err);
     showSyncStatus(`Failed to delete bookmark (${err.message})`, 'error', true);
   }
+}
+
+// ── Add Bookmark Modal Handling ──
+function setupAddBookmarkModal() {
+  const modal = document.getElementById('add-modal');
+  const addBtn = document.getElementById('add-bookmark-btn');
+  const closeBtn = document.getElementById('add-modal-close');
+  const cancelBtn = document.getElementById('add-modal-cancel');
+  const form = document.getElementById('add-bookmark-form');
+  const collectionSelect = document.getElementById('bm-collection');
+
+  if (!modal || !addBtn || !form) return;
+
+  function openAddModal() {
+    closeSharedMenu();
+    // Populate collections
+    collectionSelect.innerHTML = '<option value="">Default (Unorganized)</option>';
+    currentCollections.forEach(col => {
+      if (
+        col.name === CONFIG_COLLECTION_NAME || 
+        col.name.toLowerCase() === 'speed dial config' ||
+        col.name.toLowerCase() === '⚙️ speed dial config'
+      ) return;
+
+      const opt = document.createElement('option');
+      opt.value = String(col.id);
+      opt.textContent = col.name;
+      if (currentConfig.selectedCollectionId && String(col.id) === String(currentConfig.selectedCollectionId)) {
+        opt.selected = true;
+      }
+      collectionSelect.appendChild(opt);
+    });
+
+    document.getElementById('bm-url').value = '';
+    document.getElementById('bm-name').value = '';
+    modal.classList.remove('hidden');
+    setTimeout(() => document.getElementById('bm-url').focus(), 50);
+  }
+
+  function closeAddModal() {
+    modal.classList.add('hidden');
+  }
+
+  addBtn.addEventListener('click', openAddModal);
+  closeBtn.addEventListener('click', closeAddModal);
+  cancelBtn.addEventListener('click', closeAddModal);
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeAddModal();
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    let url = document.getElementById('bm-url').value.trim();
+    const name = document.getElementById('bm-name').value.trim();
+    const collectionId = collectionSelect.value ? Number(collectionSelect.value) : undefined;
+
+    if (!url) return;
+
+    if (!/^https?:\/\//i.test(url)) {
+      url = 'https://' + url;
+    }
+
+    const { linkwardenUrl, apiToken } = await browser.storage.sync.get(['linkwardenUrl', 'apiToken']);
+    if (!linkwardenUrl || !apiToken) {
+      showSyncStatus('Please configure Linkwarden credentials first', 'error', true);
+      closeAddModal();
+      return;
+    }
+
+    showSyncStatus('Adding bookmark to Linkwarden...', 'saving', false);
+    closeAddModal();
+
+    try {
+      const payload = {
+        type: 'url',
+        url: url,
+        name: name || undefined,
+        collection: collectionId ? { id: collectionId } : undefined
+      };
+
+      const res = await fetch(`${linkwardenUrl}/api/v1/links`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errText}`);
+      }
+
+      const json = await res.json();
+      const createdLink = json.response || json.data || json;
+
+      if (!createdLink || !createdLink.id) {
+        throw new Error('Invalid response from server');
+      }
+
+      // Add to in-memory links if viewing all or viewing matching collection
+      const viewingCol = currentConfig.selectedCollectionId;
+      const matchesCol = !viewingCol || (createdLink.collectionId && String(createdLink.collectionId) === String(viewingCol));
+
+      if (matchesCol) {
+        // Place according to defaultSort
+        if (currentConfig.defaultSort === 'newest_first') {
+          currentLinks.unshift(createdLink);
+          currentConfig.order.unshift(createdLink.id);
+        } else {
+          currentLinks.push(createdLink);
+          currentConfig.order.push(createdLink.id);
+        }
+        currentConfig.updatedAt = Date.now();
+
+        // Update local cache
+        await browser.storage.local.set({
+          cachedLinks: currentLinks,
+          cachedSpeedDialConfig: currentConfig,
+          cachedSpeedDialOrder: currentConfig.order
+        });
+
+        // Persist order to Linkwarden
+        await saveConfigToLinkwarden(linkwardenUrl, apiToken, currentConfig);
+
+        // Re-render
+        renderGrid(currentLinks, currentConfig.openInNewTab);
+      }
+
+      showSyncStatus('Bookmark added to Linkwarden ✓', 'success', true);
+    } catch (err) {
+      console.error('Failed to add bookmark:', err);
+      showSyncStatus(`Failed to add bookmark (${err.message})`, 'error', true);
+    }
+  });
 }
 
 // ── Optimized DOM Rendering with DocumentFragment & Lazy Favicons ──
@@ -772,7 +937,7 @@ function handleOrderRearranged() {
   saveDebounceTimer = setTimeout(async () => {
     const { linkwardenUrl, apiToken, syncToLinkwarden } = await browser.storage.sync.get([
       'linkwardenUrl', 
-      'apiToken',
+      'apiToken', 
       'syncToLinkwarden'
     ]);
 
@@ -798,28 +963,55 @@ async function initSpeedDial() {
   }
 
   setupGridDelegation();
+  setupAddBookmarkModal();
 
   // 1. Check local cache for instant paint
-  const localData = await browser.storage.local.get(['cachedLinks', 'cachedSpeedDialConfig', 'cachedSpeedDialOrder']);
+  const localData = await browser.storage.local.get([
+    'cachedLinks',
+    'cachedSpeedDialConfig',
+    'cachedSpeedDialOrder',
+    'dialSize',
+    'maxColumns',
+    'defaultSort'
+  ]);
+
   if (localData.cachedSpeedDialConfig) {
     currentConfig = { ...currentConfig, ...localData.cachedSpeedDialConfig };
   } else if (localData.cachedSpeedDialOrder) {
     currentConfig.order = localData.cachedSpeedDialOrder;
   }
 
+  if (localData.dialSize) currentConfig.dialSize = localData.dialSize;
+  if (localData.maxColumns) currentConfig.maxColumns = localData.maxColumns;
+  if (localData.defaultSort) currentConfig.defaultSort = localData.defaultSort;
+
+  applyLayoutSettings(currentConfig.dialSize, currentConfig.maxColumns);
+
   if (localData.cachedLinks && Array.isArray(localData.cachedLinks) && localData.cachedLinks.length > 0) {
-    currentLinks = applyCustomOrder(localData.cachedLinks, currentConfig.order);
+    currentLinks = applyCustomOrder(localData.cachedLinks, currentConfig.order, currentConfig.defaultSort);
     renderGrid(currentLinks, currentConfig.openInNewTab);
     showSyncStatus('Checking Linkwarden...', 'info', false);
   }
 
-  // 2. Fetch connection credentials
-  const syncSettings = await browser.storage.sync.get(['linkwardenUrl', 'apiToken', 'selectedCollectionId', 'openInNewTab']);
-  const { linkwardenUrl, apiToken, selectedCollectionId, openInNewTab } = syncSettings;
+  // 2. Fetch connection credentials & sync preferences
+  const syncSettings = await browser.storage.sync.get([
+    'linkwardenUrl',
+    'apiToken',
+    'selectedCollectionId',
+    'openInNewTab',
+    'dialSize',
+    'maxColumns',
+    'defaultSort'
+  ]);
 
-  if (openInNewTab !== undefined) {
-    currentConfig.openInNewTab = Boolean(openInNewTab);
-  }
+  const { linkwardenUrl, apiToken, selectedCollectionId, openInNewTab, dialSize, maxColumns, defaultSort } = syncSettings;
+
+  if (openInNewTab !== undefined) currentConfig.openInNewTab = Boolean(openInNewTab);
+  if (dialSize) currentConfig.dialSize = dialSize;
+  if (maxColumns) currentConfig.maxColumns = maxColumns;
+  if (defaultSort) currentConfig.defaultSort = defaultSort;
+
+  applyLayoutSettings(currentConfig.dialSize, currentConfig.maxColumns);
 
   if (!linkwardenUrl || !apiToken) {
     if (!localData.cachedLinks || localData.cachedLinks.length === 0) {
@@ -835,8 +1027,8 @@ async function initSpeedDial() {
 
   // 3. Fetch remote collections and config from Linkwarden
   try {
-    const collections = await fetchCollections(linkwardenUrl, apiToken);
-    const remoteConfig = await loadConfigFromLinkwarden(linkwardenUrl, apiToken, collections);
+    currentCollections = await fetchCollections(linkwardenUrl, apiToken);
+    const remoteConfig = await loadConfigFromLinkwarden(linkwardenUrl, apiToken, currentCollections);
 
     if (remoteConfig) {
       if (!currentConfig.updatedAt || (remoteConfig.updatedAt && remoteConfig.updatedAt >= currentConfig.updatedAt)) {
@@ -844,8 +1036,13 @@ async function initSpeedDial() {
         if (remoteConfig.openInNewTab !== undefined) {
           currentConfig.openInNewTab = remoteConfig.openInNewTab;
         }
+        if (remoteConfig.dialSize) currentConfig.dialSize = remoteConfig.dialSize;
+        if (remoteConfig.maxColumns) currentConfig.maxColumns = remoteConfig.maxColumns;
+        if (remoteConfig.defaultSort) currentConfig.defaultSort = remoteConfig.defaultSort;
       }
     }
+
+    applyLayoutSettings(currentConfig.dialSize, currentConfig.maxColumns);
 
     // 4. Fetch links
     const targetCollectionId = selectedCollectionId || currentConfig.selectedCollectionId || null;
@@ -855,11 +1052,14 @@ async function initSpeedDial() {
     await browser.storage.local.set({
       cachedLinks: rawLinks,
       cachedSpeedDialConfig: currentConfig,
-      cachedSpeedDialOrder: currentConfig.order
+      cachedSpeedDialOrder: currentConfig.order,
+      dialSize: currentConfig.dialSize,
+      maxColumns: currentConfig.maxColumns,
+      defaultSort: currentConfig.defaultSort
     });
 
     // 5. Apply custom order and render
-    currentLinks = applyCustomOrder(rawLinks, currentConfig.order);
+    currentLinks = applyCustomOrder(rawLinks, currentConfig.order, currentConfig.defaultSort);
     renderGrid(currentLinks, currentConfig.openInNewTab);
 
     showSyncStatus('Synced with Linkwarden ✓', 'success', true);

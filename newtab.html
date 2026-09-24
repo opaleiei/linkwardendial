@@ -5,20 +5,59 @@
   <title>New Tab</title>
   <link rel="stylesheet" href="newtab.css">
 </head>
-<body>
+<body class="size-medium">
   <div id="app">
     <div id="message" class="hidden"></div>
-    <div id="grid" class="grid"></div>
+    <div id="grid" class="grid cols-unlimited"></div>
   </div>
 
   <div id="sync-status" class="sync-status hidden"></div>
 
-  <button id="settings-btn" class="settings-btn" title="Speed Dial Settings" aria-label="Settings">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="3"></circle>
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-    </svg>
-  </button>
+  <!-- Floating action controls -->
+  <div class="floating-controls">
+    <button id="add-bookmark-btn" class="ctrl-btn" title="Add Bookmark" aria-label="Add Bookmark">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+    </button>
+    <button id="settings-btn" class="ctrl-btn" title="Speed Dial Settings" aria-label="Settings">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Add Bookmark Modal Dialog -->
+  <div id="add-modal" class="modal-overlay hidden">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>➕ Add Bookmark</h3>
+        <button id="add-modal-close" class="modal-close-btn" type="button" aria-label="Close">&times;</button>
+      </div>
+      <form id="add-bookmark-form">
+        <div class="modal-field">
+          <label for="bm-url">URL <span style="color:#f38ba8">*</span></label>
+          <input type="text" id="bm-url" placeholder="https://example.com" required autocomplete="off">
+        </div>
+        <div class="modal-field">
+          <label for="bm-name">Name / Title (Optional)</label>
+          <input type="text" id="bm-name" placeholder="Leave empty to auto-fetch title" autocomplete="off">
+        </div>
+        <div class="modal-field">
+          <label for="bm-collection">Collection</label>
+          <select id="bm-collection">
+            <option value="">Default (Unorganized)</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="add-modal-cancel" class="btn-cancel">Cancel</button>
+          <button type="submit" id="add-modal-submit" class="btn-primary">Add Bookmark</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <script src="newtab.js"></script>
 </body>

@@ -44,7 +44,7 @@ async function loadCollections(linkwardenUrl, apiToken, currentSelectedId = null
         col.name.toLowerCase() === '⚙️ speed dial config'
       ) {
         configCollection = col;
-        return; // Don't add config collection itself as a bookmark choice
+        return;
       }
 
       const opt = document.createElement('option');
@@ -71,14 +71,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     'openInNewTab',
     'syncToLinkwarden',
     'backgroundColor',
-    'bgImageUrl'
+    'bgImageUrl',
+    'dialSize',
+    'maxColumns',
+    'defaultSort'
   ]);
 
-  // Load local settings (especially uploaded background image)
+  // Load local settings
   const localData = await browser.storage.local.get([
     'backgroundColor',
     'bgImageUrl',
-    'bgImageData'
+    'bgImageData',
+    'dialSize',
+    'maxColumns',
+    'defaultSort'
   ]);
 
   if (syncData.linkwardenUrl) document.getElementById('serverUrl').value = syncData.linkwardenUrl;
@@ -87,6 +93,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (syncData.syncToLinkwarden !== undefined) {
     document.getElementById('syncToLinkwarden').checked = syncData.syncToLinkwarden;
   }
+
+  // Dial Size
+  const dialSize = localData.dialSize || syncData.dialSize || 'medium';
+  document.getElementById('dialSize').value = dialSize;
+
+  // Max Columns
+  const maxColumns = localData.maxColumns || syncData.maxColumns || 'unlimited';
+  document.getElementById('maxColumns').value = maxColumns;
+
+  // Default Sort
+  const defaultSort = localData.defaultSort || syncData.defaultSort || 'newest_last';
+  document.getElementById('defaultSort').value = defaultSort;
 
   // Appearance & Background
   const savedBgColor = localData.backgroundColor || syncData.backgroundColor || DEFAULT_BG_COLOR;
@@ -208,6 +226,10 @@ document.getElementById('save').addEventListener('click', async () => {
   const openInNewTab = document.getElementById('openInNewTab').checked;
   const syncToLinkwarden = document.getElementById('syncToLinkwarden').checked;
 
+  const dialSize = document.getElementById('dialSize').value;
+  const maxColumns = document.getElementById('maxColumns').value;
+  const defaultSort = document.getElementById('defaultSort').value;
+
   const bgColor = document.getElementById('bgColorText').value.trim() || document.getElementById('bgColorPicker').value || DEFAULT_BG_COLOR;
   const bgImageUrl = document.getElementById('bgImageUrl').value.trim();
 
@@ -215,7 +237,7 @@ document.getElementById('save').addEventListener('click', async () => {
     url = url.slice(0, -1);
   }
 
-  // 1. Save general settings to sync
+  // 1. Save settings to sync
   await browser.storage.sync.set({
     linkwardenUrl: url,
     apiToken: token,
@@ -223,13 +245,19 @@ document.getElementById('save').addEventListener('click', async () => {
     openInNewTab,
     syncToLinkwarden,
     backgroundColor: bgColor,
-    bgImageUrl: bgImageUrl
+    bgImageUrl: bgImageUrl,
+    dialSize,
+    maxColumns,
+    defaultSort
   });
 
-  // 2. Save background to local storage (safe for large image data URLs)
+  // 2. Save background and preferences to local storage
   const localUpdates = {
     backgroundColor: bgColor,
-    bgImageUrl: bgImageUrl
+    bgImageUrl: bgImageUrl,
+    dialSize,
+    maxColumns,
+    defaultSort
   };
 
   if (shouldClearBgImage) {
@@ -270,7 +298,14 @@ document.getElementById('save').addEventListener('click', async () => {
             },
             body: JSON.stringify({
               name: CONFIG_COLLECTION_NAME,
-              description: JSON.stringify({ v: 1, order: [], t: Date.now() }),
+              description: JSON.stringify({
+                v: 1,
+                order: [],
+                t: Date.now(),
+                dialSize,
+                maxColumns,
+                defaultSort
+              }),
               color: '#89b4fa'
             })
           });
@@ -285,7 +320,7 @@ document.getElementById('save').addEventListener('click', async () => {
 });
 
 document.getElementById('reset-order').addEventListener('click', async () => {
-  if (!confirm('Are you sure you want to reset your bookmark dial order to the default chronological order?')) {
+  if (!confirm('Are you sure you want to reset your bookmark dial order to the default sorting order?')) {
     return;
   }
 
@@ -350,5 +385,5 @@ document.getElementById('reset-order').addEventListener('click', async () => {
     }
   }
 
-  showStatus('Dial order has been reset to default!', 'success');
+  showStatus('Dial order has been reset!', 'success');
 });

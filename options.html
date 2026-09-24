@@ -61,6 +61,7 @@
       color: #cdd6f4;
       box-sizing: border-box;
       font-size: 14px;
+      font-family: inherit;
       transition: border-color 0.2s;
     }
     input[type="text"]:focus,
@@ -166,6 +167,11 @@
       background: #313244;
       box-sizing: border-box;
     }
+    .row-2col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
   </style>
 </head>
 <body>
@@ -189,7 +195,35 @@
   </div>
 
   <div class="card-box">
-    <div class="card-box-title">🎨 Appearance & Background</div>
+    <div class="card-box-title">🎨 Appearance & Layout</div>
+    
+    <div class="row-2col field">
+      <div>
+        <label for="dialSize">Dial Size:</label>
+        <select id="dialSize">
+          <option value="small">Small</option>
+          <option value="medium" selected>Medium (Default)</option>
+          <option value="large">Large</option>
+        </select>
+        <div class="hint">Size of the bookmark cards.</div>
+      </div>
+      <div>
+        <label for="maxColumns">Max Columns:</label>
+        <select id="maxColumns">
+          <option value="unlimited" selected>Unlimited (Auto-fill)</option>
+          <option value="3">3 Columns</option>
+          <option value="4">4 Columns</option>
+          <option value="5">5 Columns</option>
+          <option value="6">6 Columns</option>
+          <option value="7">7 Columns</option>
+          <option value="8">8 Columns</option>
+          <option value="9">9 Columns</option>
+          <option value="10">10 Columns</option>
+        </select>
+        <div class="hint">Maximum cards per row.</div>
+      </div>
+    </div>
+
     <div class="field">
       <label for="bgColorPicker">Background Color:</label>
       <div class="color-row">
@@ -218,13 +252,22 @@
   </div>
 
   <div class="card-box">
-    <div class="card-box-title">📑 Bookmarks & Sync</div>
+    <div class="card-box-title">📑 Bookmarks & Sort</div>
     <div class="field">
       <label for="collectionSelect">Display Collection:</label>
       <select id="collectionSelect">
         <option value="">All Bookmarks (Default)</option>
       </select>
       <div class="hint">Choose which collection to show on your speed dial.</div>
+    </div>
+
+    <div class="field">
+      <label for="defaultSort">Default Sort Order:</label>
+      <select id="defaultSort">
+        <option value="newest_last" selected>New dials last (Oldest first)</option>
+        <option value="newest_first">New dials first (Newest first)</option>
+      </select>
+      <div class="hint">Position for unarranged dials and newly added bookmarks.</div>
     </div>
 
     <div class="checkbox-field">
