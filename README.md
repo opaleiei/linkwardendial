@@ -4,20 +4,25 @@
 
 A modern, fast, and customizable Speed Dial new tab extension for Firefox powered by your self-hosted or cloud [Linkwarden](https://linkwarden.app) instance.
 
-## Features
-
-- **Drag & Drop Rearrangement**: Drag any bookmark dial to reorder it (e.g. drag your favorite bookmark straight to the top).
-- **Linkwarden Cloud Config Storage**: Your custom dial order and settings are automatically synced and persisted directly into your Linkwarden instance (in a dedicated `⚙️ Speed Dial Config` collection).
-- **Instant Paint / Local Cache**: Uses local cache for 0ms instant loading every time you open a new tab, then silently updates from Linkwarden in the background.
+- **Right-Click Context Menu**: Instant, lag-free right-click menu with clean icons:
+  - ↗️ Open in new tab
+  - 📑 Open in background tab
+  - 🗔 Open in new window
+  - 🕵️ Open in new private window
+  - ✏️ Edit bookmark (title, URL, and collection)
+  - 🗑️ Delete bookmark with confirmation dialog
+- **Ultra-Fast Potato PC Mode**: Stripped of heavy CSS transforms, transitions, and `backdrop-filter: blur` to run silky smooth even on low-end hardware.
+- **Add & Edit Bookmarks Directly**: Floating `+` button to add bookmarks and right-click &rarr; Edit to modify title, URL, or collection without visiting Linkwarden.
 - **Customizable Dial Sizes**: Choose between **Small**, **Medium** (default), or **Large** dials to suit your monitor and aesthetic preferences.
 - **Configurable Grid Columns**: Set maximum columns per row (3 to 10 columns, or **Unlimited / Auto-fill**).
 - **Default Sort Control**: Choose whether new unarranged dials appear **first** or **last**.
-- **Add Bookmarks Directly**: Floating `+` button on the new tab page opens an Add Bookmark modal that saves directly to your Linkwarden instance.
-- **Delete Bookmarks Directly**: Hover over any bookmark card to reveal the 3-dot menu and delete the bookmark directly from Linkwarden with one click.
+- **Drag & Drop Rearrangement**: Drag any bookmark dial to reorder it.
+- **Linkwarden Cloud Config Storage**: Your custom dial order and settings are automatically synced and persisted directly into your Linkwarden instance (in a dedicated `⚙️ Speed Dial Config` collection).
+- **Instant Paint / Local Cache**: Uses local cache for 0ms instant loading every time you open a new tab, then silently updates from Linkwarden in the background.
 - **Customizable Background**: Pick any background color using the color picker / hex input, or set a background wallpaper using an online Image URL or by uploading a local image.
 - **Collection Filtering**: Choose to show bookmarks from all collections or a specific collection (e.g. "Speed Dial", "Favorites", or "Work").
 - **High-Performance Architecture**: Zero-lag rendering with event delegation, lazy-loaded favicons, and CSS content-visibility for collections with hundreds of bookmarks.
-- **Dark Catppuccin Theme**: Beautiful, clean dark interface with smooth hover and drag animations.
+- **Dark Catppuccin Theme**: Clean dark interface with high-contrast readable elements.
 
 ## Setup
 

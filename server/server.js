@@ -622,7 +622,49 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { response: newLink, status: 200 });
   }
 
-  // 7. Delete Bookmark
+  // 7. Update Bookmark
+  // PUT /api/v1/links/:id
+  const putLinkMatch = pathname.match(/^\/api\/v1\/links\/(\d+)$/);
+  if (putLinkMatch && method === 'PUT') {
+    const id = parseInt(putLinkMatch[1], 10);
+    const body = await parseBody(req);
+    const link = db.links.find(l => l.id === id);
+
+    if (!link) {
+      return sendJson(res, 404, { response: 'Bookmark not found' });
+    }
+
+    if (body.url) {
+      let targetUrl = String(body.url).trim();
+      if (!/^https?:\/\//i.test(targetUrl)) targetUrl = 'https://' + targetUrl;
+      link.url = targetUrl;
+      try {
+        const domain = new URL(targetUrl).hostname;
+        link.favIcon = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+      } catch (_) {}
+    }
+
+    if (body.name !== undefined) {
+      link.name = String(body.name).trim() || link.url;
+    }
+
+    if (body.description !== undefined) {
+      link.description = String(body.description);
+    }
+
+    if (body.collectionId) {
+      link.collectionId = parseInt(body.collectionId, 10);
+    } else if (body.collection && body.collection.id) {
+      link.collectionId = parseInt(body.collection.id, 10);
+    }
+
+    link.updatedAt = new Date().toISOString();
+    saveDb();
+    console.log(`[Mini-Linkwarden] Updated bookmark id ${id} ("${link.name}")`);
+    return sendJson(res, 200, { response: link, status: 200 });
+  }
+
+  // 8. Delete Bookmark
   // DELETE /api/v1/links/:id
   const deleteLinkMatch = pathname.match(/^\/api\/v1\/links\/(\d+)$/);
   if (deleteLinkMatch && method === 'DELETE') {

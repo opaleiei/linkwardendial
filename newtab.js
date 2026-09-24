@@ -23,10 +23,13 @@ let statusTimeout = null;
 // Map of id/url -> bookmark item for O(1) lookups during delegated events
 const itemMap = new Map();
 
-// Single shared dropdown in document.body
-let sharedMenu = null;
-let activeMenuItem = null;
-let activeMenuCard = null;
+// Context Menu State
+let activeContextItem = null;
+let activeContextCard = null;
+
+// Edit Modal State
+let editingItem = null;
+let editingCard = null;
 
 // Apply custom background color / image immediately
 async function applyBackground() {
@@ -56,7 +59,6 @@ function applyLayoutSettings(dialSize = 'medium', maxColumns = 'unlimited') {
 
   const gridEl = document.getElementById('grid');
   if (gridEl) {
-    // Remove existing column classes
     gridEl.className = gridEl.className.replace(/\bcols-\S+/g, '').trim();
     const colClass = (maxColumns && maxColumns !== 'unlimited') ? `cols-${maxColumns}` : 'cols-unlimited';
     gridEl.classList.add(colClass);
@@ -74,9 +76,8 @@ function showSyncStatus(text, type = 'info', autoHide = true) {
 
   if (autoHide) {
     statusTimeout = setTimeout(() => {
-      el.classList.add('fading');
-      setTimeout(() => el.classList.add('hidden'), 400);
-    }, 2500);
+      el.classList.add('hidden');
+    }, 2200);
   }
 }
 
@@ -418,78 +419,227 @@ function applyCustomOrder(links, order, defaultSort = 'newest_last') {
 
   remaining.sort(defaultSortComparator);
 
-  // If newest dials first is preferred, new unarranged bookmarks appear at the top!
   return isNewestFirst ? [...remaining, ...ordered] : [...ordered, ...remaining];
 }
 
-// ── Single Shared Dropdown Implementation ──
-function getOrCreateSharedMenu() {
-  if (sharedMenu) return sharedMenu;
+// ── Right-Click Context Menu Implementation ──
+function openContextMenu(clientX, clientY, item, card) {
+  const menu = document.getElementById('context-menu');
+  if (!menu) return;
 
-  sharedMenu = document.createElement('div');
-  sharedMenu.className = 'card-dropdown';
-  sharedMenu.innerHTML = `
-    <button class="card-dropdown-item danger" type="button">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="3 6 5 6 21 6"></polyline>
-        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-        <line x1="10" y1="11" x2="10" y2="17"></line>
-        <line x1="14" y1="11" x2="14" y2="17"></line>
-      </svg>
-      <span>Delete bookmark</span>
-    </button>
-  `;
+  activeContextItem = item;
+  activeContextCard = card;
 
-  sharedMenu.querySelector('.card-dropdown-item.danger').addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const item = activeMenuItem;
-    const card = activeMenuCard;
-    closeSharedMenu();
-    if (item && card) {
+  menu.classList.remove('hidden');
+
+  const menuWidth = 210;
+  const menuHeight = 220;
+
+  let posX = clientX;
+  let posY = clientY;
+
+  if (posX + menuWidth > window.innerWidth - 10) {
+    posX = window.innerWidth - menuWidth - 10;
+  }
+  if (posY + menuHeight > window.innerHeight - 10) {
+    posY = window.innerHeight - menuHeight - 10;
+  }
+
+  menu.style.left = `${Math.max(10, posX)}px`;
+  menu.style.top = `${Math.max(10, posY)}px`;
+}
+
+function closeContextMenu() {
+  const menu = document.getElementById('context-menu');
+  if (menu) menu.classList.add('hidden');
+  activeContextItem = null;
+  activeContextCard = null;
+}
+
+function setupContextMenu() {
+  const menu = document.getElementById('context-menu');
+  if (!menu) return;
+
+  menu.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.context-menu-item');
+    if (!btn) return;
+
+    const action = btn.dataset.action;
+    const item = activeContextItem;
+    const card = activeContextCard;
+    closeContextMenu();
+
+    if (!item) return;
+
+    if (action === 'newtab') {
+      if (typeof browser !== 'undefined' && browser.tabs && browser.tabs.create) {
+        browser.tabs.create({ url: item.url, active: true });
+      } else {
+        window.open(item.url, '_blank');
+      }
+    } else if (action === 'backgroundtab') {
+      if (typeof browser !== 'undefined' && browser.tabs && browser.tabs.create) {
+        browser.tabs.create({ url: item.url, active: false });
+      } else {
+        window.open(item.url, '_blank');
+      }
+    } else if (action === 'newwindow') {
+      if (typeof browser !== 'undefined' && browser.windows && browser.windows.create) {
+        browser.windows.create({ url: item.url });
+      } else {
+        window.open(item.url, '_blank', 'noopener,noreferrer');
+      }
+    } else if (action === 'privatewindow') {
+      if (typeof browser !== 'undefined' && browser.windows && browser.windows.create) {
+        browser.windows.create({ url: item.url, incognito: true }).catch(() => {
+          browser.windows.create({ url: item.url });
+        });
+      } else {
+        window.open(item.url, '_blank');
+      }
+    } else if (action === 'edit') {
+      openEditModal(item, card);
+    } else if (action === 'delete') {
       confirmDeleteBookmark(item, card);
     }
   });
 
-  document.body.appendChild(sharedMenu);
-  return sharedMenu;
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#context-menu')) {
+      closeContextMenu();
+    }
+  });
+
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.target.closest('.card') && !e.target.closest('#context-menu')) {
+      closeContextMenu();
+    }
+  });
+
+  window.addEventListener('scroll', closeContextMenu, { passive: true });
+  window.addEventListener('resize', closeContextMenu, { passive: true });
 }
 
-function openSharedMenu(buttonEl, item, cardEl) {
-  const menu = getOrCreateSharedMenu();
+// ── Edit Bookmark Modal Handling ──
+function setupEditBookmarkModal() {
+  const modal = document.getElementById('edit-modal');
+  const closeBtn = document.getElementById('edit-modal-close');
+  const cancelBtn = document.getElementById('edit-modal-cancel');
+  const form = document.getElementById('edit-bookmark-form');
+  const collectionSelect = document.getElementById('edit-bm-collection');
 
-  if (activeMenuCard === cardEl && menu.classList.contains('open')) {
-    closeSharedMenu();
-    return;
+  if (!modal || !form) return;
+
+  function closeEditModal() {
+    modal.classList.add('hidden');
+    editingItem = null;
+    editingCard = null;
   }
 
-  activeMenuItem = item;
-  activeMenuCard = cardEl;
+  closeBtn.addEventListener('click', closeEditModal);
+  cancelBtn.addEventListener('click', closeEditModal);
 
-  const rect = buttonEl.getBoundingClientRect();
-  const top = Math.max(10, rect.top - 42);
-  const left = Math.max(10, rect.right - 145);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeEditModal();
+  });
 
-  menu.style.top = `${top}px`;
-  menu.style.left = `${left}px`;
-  menu.classList.add('open');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!editingItem) return;
+
+    let url = document.getElementById('edit-bm-url').value.trim();
+    const name = document.getElementById('edit-bm-name').value.trim();
+    const collectionId = collectionSelect.value ? Number(collectionSelect.value) : undefined;
+
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) {
+      url = 'https://' + url;
+    }
+
+    const { linkwardenUrl, apiToken } = await browser.storage.sync.get(['linkwardenUrl', 'apiToken']);
+    if (!linkwardenUrl || !apiToken) {
+      showSyncStatus('Credentials not configured', 'error', true);
+      closeEditModal();
+      return;
+    }
+
+    showSyncStatus('Updating bookmark...', 'saving', false);
+    const itemToUpdate = editingItem;
+    closeEditModal();
+
+    try {
+      const payload = {
+        id: Number(itemToUpdate.id),
+        url: url,
+        name: name || url,
+        collectionId: collectionId,
+        collection: collectionId ? { id: collectionId, ownerId: itemToUpdate.collection?.ownerId || 1 } : undefined,
+        tags: itemToUpdate.tags || [],
+        description: itemToUpdate.description || ''
+      };
+
+      const res = await fetch(`${linkwardenUrl}/api/v1/links/${itemToUpdate.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${apiToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errText}`);
+      }
+
+      const json = await res.json();
+      const updated = json.response || json.data || json;
+
+      itemToUpdate.name = (updated && updated.name) || name || url;
+      itemToUpdate.url = (updated && updated.url) || url;
+      if (collectionId) itemToUpdate.collectionId = collectionId;
+
+      await browser.storage.local.set({ cachedLinks: currentLinks });
+
+      renderGrid(currentLinks, currentConfig.openInNewTab);
+      showSyncStatus('Bookmark updated ✓', 'success', true);
+    } catch (err) {
+      console.error('Failed to update bookmark:', err);
+      showSyncStatus(`Failed to update (${err.message})`, 'error', true);
+    }
+  });
 }
 
-function closeSharedMenu() {
-  if (sharedMenu) {
-    sharedMenu.classList.remove('open');
-  }
-  activeMenuItem = null;
-  activeMenuCard = null;
+function openEditModal(item, card) {
+  const modal = document.getElementById('edit-modal');
+  const collectionSelect = document.getElementById('edit-bm-collection');
+  if (!modal) return;
+
+  editingItem = item;
+  editingCard = card;
+
+  collectionSelect.innerHTML = '<option value="">Default (Unorganized)</option>';
+  currentCollections.forEach(col => {
+    if (
+      col.name === CONFIG_COLLECTION_NAME || 
+      col.name.toLowerCase() === 'speed dial config' ||
+      col.name.toLowerCase() === '⚙️ speed dial config'
+    ) return;
+
+    const opt = document.createElement('option');
+    opt.value = String(col.id);
+    opt.textContent = col.name;
+    if (item.collectionId && String(col.id) === String(item.collectionId)) {
+      opt.selected = true;
+    }
+    collectionSelect.appendChild(opt);
+  });
+
+  document.getElementById('edit-bm-url').value = item.url || '';
+  document.getElementById('edit-bm-name').value = item.name || '';
+  modal.classList.remove('hidden');
+  setTimeout(() => document.getElementById('edit-bm-name').focus(), 50);
 }
-
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.card-menu-btn') && !e.target.closest('.card-dropdown')) {
-    closeSharedMenu();
-  }
-});
-
-window.addEventListener('scroll', closeSharedMenu, { passive: true });
 
 function confirmDeleteBookmark(item, cardEl) {
   document.querySelector('.delete-overlay')?.remove();
@@ -556,18 +706,13 @@ async function executeDeleteBookmark(item, cardEl) {
       throw new Error(`HTTP ${res.status}: ${errText}`);
     }
 
-    cardEl.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
-    cardEl.style.opacity = '0';
-    cardEl.style.transform = 'scale(0.8)';
-    setTimeout(() => {
-      cardEl.remove();
-      const gridEl = document.getElementById('grid');
-      if (!gridEl || gridEl.children.length === 0) {
-        const messageEl = document.getElementById('message');
-        messageEl.textContent = 'No bookmarks found in Linkwarden.';
-        messageEl.classList.remove('hidden');
-      }
-    }, 200);
+    cardEl.remove();
+    const gridEl = document.getElementById('grid');
+    if (!gridEl || gridEl.children.length === 0) {
+      const messageEl = document.getElementById('message');
+      messageEl.textContent = 'No bookmarks found in Linkwarden.';
+      messageEl.classList.remove('hidden');
+    }
 
     const key = String(item.id || item.url);
     itemMap.delete(key);
@@ -607,8 +752,7 @@ function setupAddBookmarkModal() {
   if (!modal || !addBtn || !form) return;
 
   function openAddModal() {
-    closeSharedMenu();
-    // Populate collections
+    closeContextMenu();
     collectionSelect.innerHTML = '<option value="">Default (Unorganized)</option>';
     currentCollections.forEach(col => {
       if (
@@ -696,12 +840,10 @@ function setupAddBookmarkModal() {
         throw new Error('Invalid response from server');
       }
 
-      // Add to in-memory links if viewing all or viewing matching collection
       const viewingCol = currentConfig.selectedCollectionId;
       const matchesCol = !viewingCol || (createdLink.collectionId && String(createdLink.collectionId) === String(viewingCol));
 
       if (matchesCol) {
-        // Place according to defaultSort
         if (currentConfig.defaultSort === 'newest_first') {
           currentLinks.unshift(createdLink);
           currentConfig.order.unshift(createdLink.id);
@@ -711,17 +853,14 @@ function setupAddBookmarkModal() {
         }
         currentConfig.updatedAt = Date.now();
 
-        // Update local cache
         await browser.storage.local.set({
           cachedLinks: currentLinks,
           cachedSpeedDialConfig: currentConfig,
           cachedSpeedDialOrder: currentConfig.order
         });
 
-        // Persist order to Linkwarden
         await saveConfigToLinkwarden(linkwardenUrl, apiToken, currentConfig);
 
-        // Re-render
         renderGrid(currentLinks, currentConfig.openInNewTab);
       }
 
@@ -733,12 +872,12 @@ function setupAddBookmarkModal() {
   });
 }
 
-// ── Optimized DOM Rendering with DocumentFragment & Lazy Favicons ──
+// ── Ultra-Fast Minimal DOM Rendering (No 3-dot buttons, no animations) ──
 function renderGrid(links, openInNewTab = false) {
   const gridEl = document.getElementById('grid');
   const messageEl = document.getElementById('message');
 
-  closeSharedMenu();
+  closeContextMenu();
   itemMap.clear();
 
   if (!links || links.length === 0) {
@@ -789,16 +928,8 @@ function renderGrid(links, openInNewTab = false) {
     title.className = 'title';
     title.textContent = item.name || item.url;
 
-    const menuBtn = document.createElement('button');
-    menuBtn.className = 'card-menu-btn';
-    menuBtn.type = 'button';
-    menuBtn.title = 'Bookmark options';
-    menuBtn.setAttribute('aria-label', 'Bookmark options');
-    menuBtn.textContent = '⋮';
-
     card.appendChild(icon);
     card.appendChild(title);
-    card.appendChild(menuBtn);
 
     fragment.appendChild(card);
   }
@@ -806,18 +937,29 @@ function renderGrid(links, openInNewTab = false) {
   gridEl.replaceChildren(fragment);
 }
 
-// ── Event Delegation for Grid (Zero per-card listeners) ──
+// ── Event Delegation for Grid (Drag & Drop + Right-Click Context Menu) ──
 function setupGridDelegation() {
   const gridEl = document.getElementById('grid');
   if (!gridEl || gridEl.dataset.delegated) return;
   gridEl.dataset.delegated = 'true';
 
-  gridEl.addEventListener('dragstart', (e) => {
-    if (e.target.closest('.card-menu-btn')) {
-      e.preventDefault();
-      return;
+  // Right-click context menu delegation
+  gridEl.addEventListener('contextmenu', (e) => {
+    const card = e.target.closest('.card');
+    if (!card) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const item = itemMap.get(card.dataset.id);
+    if (item) {
+      openContextMenu(e.clientX, e.clientY, item, card);
     }
-    closeSharedMenu();
+  });
+
+  // Drag & drop delegation
+  gridEl.addEventListener('dragstart', (e) => {
+    closeContextMenu();
 
     const card = e.target.closest('.card');
     if (!card) return;
@@ -895,20 +1037,6 @@ function setupGridDelegation() {
   });
 
   gridEl.addEventListener('click', (e) => {
-    const menuBtn = e.target.closest('.card-menu-btn');
-    if (menuBtn) {
-      e.preventDefault();
-      e.stopPropagation();
-      const card = menuBtn.closest('.card');
-      if (card) {
-        const item = itemMap.get(card.dataset.id);
-        if (item) {
-          openSharedMenu(menuBtn, item, card);
-        }
-      }
-      return false;
-    }
-
     const card = e.target.closest('.card');
     if (!card) return;
 
@@ -963,7 +1091,9 @@ async function initSpeedDial() {
   }
 
   setupGridDelegation();
+  setupContextMenu();
   setupAddBookmarkModal();
+  setupEditBookmarkModal();
 
   // 1. Check local cache for instant paint
   const localData = await browser.storage.local.get([

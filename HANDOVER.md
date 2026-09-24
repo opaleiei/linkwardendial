@@ -19,10 +19,10 @@ This document provides complete architectural and operational context for any de
 
 | File | Role / Contents |
 |---|---|
-| `manifest.json` | WebExtension manifest (V3) specifying permissions (`storage`, `<all_urls>`), `chrome_url_overrides.newtab`, options UI. |
-| `newtab.html` | Speed dial new tab view: grid container, floating action controls (+ Add Bookmark and ⚙ Settings), Add Bookmark modal, and sync toast status. |
-| `newtab.css` | Complete stylesheet: Catppuccin theme, CSS variable-driven dial sizing (`small`, `medium`, `large`), column caps (3–10 or unlimited), event-delegated drag & drop indicators, shared popup menu, and modals. |
-| `newtab.js` | Core new tab logic: instant cache painting, event delegation on `#grid`, shared context menu, drag-and-drop reordering, direct Linkwarden bookmark creation & deletion, bidirectional cloud config sync. |
+| `manifest.json` | WebExtension manifest (V3) specifying permissions (`storage`, `tabs`, `<all_urls>`), `chrome_url_overrides.newtab`, options UI. |
+| `newtab.html` | Speed dial new tab view: grid container, floating action controls (+ Add Bookmark and ⚙ Settings), Add Bookmark modal, Edit Bookmark modal, custom Right-Click Context Menu, and sync toast status. |
+| `newtab.css` | Complete stylesheet: Catppuccin theme, CSS variable-driven dial sizing (`small`, `medium`, `large`), column caps (3–10 or unlimited), drag & drop indicators, context menu, modals, with zero laggy transitions for potato PCs. |
+| `newtab.js` | Core new tab logic: instant cache painting, event delegation on `#grid`, custom right-click context menu (new tab, background tab, new window, private window, edit, delete), drag-and-drop reordering, direct Linkwarden bookmark creation, updating & deletion, bidirectional cloud config sync. |
 | `options.html` | Options page UI: credentials & connection tester, dial size selector, max columns selector, background color picker + hex input, wallpaper URL / file upload, collection filter, default sort, and order reset. |
 | `options.js` | Options logic: loads and saves settings to `browser.storage.sync` and `browser.storage.local`, validates Linkwarden credentials via `/api/v1/collections`. |
 | `docker-compose.yml` | Docker compose manifest to run Mini-Linkwarden standalone bookmark server on port 3000. |
@@ -68,11 +68,22 @@ This document provides complete architectural and operational context for any de
 
 ---
 
-## 4. Implemented Features (v1.0 to v1.4)
+## 4. Implemented Features (v1.0 to v1.5)
 
-1. **Drag-and-Drop Dial Reordering**: Reorder cards by dragging; visual drop target indicators; prevents accidental link navigation during drag.
-2. **Linkwarden Cloud Sync**: Custom layout order and settings persist into Linkwarden.
-3. **Options Page**:
+1. **Right-Click Context Menu (v1.5)**: Replaced laggy 3-dot hover buttons with an instant custom right-click context menu featuring SVG icons:
+   - **Open in new tab**: opens active foreground tab.
+   - **Open in background tab**: opens inactive tab without losing focus.
+   - **Open in new window**: launches clean window.
+   - **Open in new private window**: launches incognito session (with fallback).
+   - **Edit**: opens modal to edit bookmark name, URL, or collection.
+   - **Delete**: shows quick confirmation dialog and deletes directly via API.
+2. **Ultra-Fast "Potato PC" Optimizations (v1.5)**:
+   - Stripped all hover transitions (`transition: none !important`), transforms (`translateY`), and expensive `backdrop-filter: blur`.
+   - Cards render with zero extra buttons or hover elements, keeping layout and compositor trees minimal.
+3. **Bookmark Editing Modal (v1.5)**: Allows in-place editing of title, URL, and collection, syncing via `PUT /api/v1/links/:id` on both Linkwarden and Mini-Linkwarden.
+4. **Drag-and-Drop Dial Reordering**: Reorder cards by dragging; visual drop target indicators; prevents accidental link navigation during drag.
+5. **Linkwarden Cloud Sync**: Custom layout order and settings persist into Linkwarden.
+6. **Options Page**:
    - Connection tester for Linkwarden URL and API token.
    - Collection filter selector.
    - "Open in new tab" toggle.
@@ -82,9 +93,8 @@ This document provides complete architectural and operational context for any de
    - Max Columns: `unlimited` (auto-fill), `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`.
    - Default Sort: `new dials last` (oldest first) vs `new dials first` (newest first).
    - One-click "Reset Dial Order" button.
-4. **Delete Bookmark from New Tab**: Hovering over any dial reveals a 3-dot button `⋮`. Clicking shows a Delete option with a confirmation modal that calls `DELETE /api/v1/links/:id` in Linkwarden.
-5. **Add Bookmark from New Tab**: Floating `+` action button opens a modal allowing users to enter a URL, title, and target collection, posting directly to `POST /api/v1/links`.
-6. **Optimized Large Collection Rendering**: Smooth 60+ FPS even with hundreds of bookmarks.
+7. **Add Bookmark from New Tab**: Floating `+` action button opens a modal allowing users to enter a URL, title, and target collection, posting directly to `POST /api/v1/links`.
+8. **Optimized Large Collection Rendering**: Smooth 60+ FPS even with hundreds of bookmarks.
 
 ---
 
@@ -97,6 +107,7 @@ This document provides complete architectural and operational context for any de
 | Update config collection | `PUT /api/v1/collections/:id` | `{ id: number, name: string, description: string, color: string, members: array }` |
 | Fetch bookmarks | `GET /api/v1/search?limit=100&cursor=...` or `/api/v1/links` | Paginated search endpoint |
 | Create bookmark | `POST /api/v1/links` | `{ type: "url", url: string, name?: string, collection?: { id: number } }` |
+| Update bookmark | `PUT /api/v1/links/:id` | `{ id: number, name?: string, url?: string, collection?: { id: number } }` |
 | Delete bookmark | `DELETE /api/v1/links/:id` | Deletes link from Prisma database, file storage, and search index |
 
 ---

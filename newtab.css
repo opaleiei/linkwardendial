@@ -88,6 +88,7 @@ body {
   }
 }
 
+/* Card: Zero lag, instantaneous styling */
 .card {
   background: #181825;
   border: 1px solid #313244;
@@ -107,11 +108,10 @@ body {
   box-sizing: border-box;
   content-visibility: auto;
   contain-intrinsic-size: var(--dial-width) var(--dial-height);
-  transition: transform 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  transition: none !important;
 }
 
 .card:hover:not(.dragging) {
-  transform: translateY(-4px);
   border-color: #89b4fa;
   background: #1e1e2e;
 }
@@ -122,11 +122,9 @@ body {
 
 .card.dragging {
   opacity: 0.35;
-  transform: scale(0.95);
   border: 2px dashed #89b4fa;
   background: #1e1e2e;
   cursor: grabbing;
-  will-change: transform;
 }
 
 /* Drop target indicators */
@@ -174,61 +172,28 @@ body {
   text-decoration: underline;
 }
 
-/* ── Lightweight Card Context Menu (3-dot button) ── */
-.card-menu-btn {
-  position: absolute;
-  bottom: 6px;
-  right: 6px;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: transparent;
-  color: #6c7086;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  line-height: 1;
-  opacity: 0;
-  transition: opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
-  z-index: 10;
-  padding: 0;
-}
-
-.card:hover .card-menu-btn,
-.card:focus-within .card-menu-btn {
-  opacity: 1;
-}
-
-.card-menu-btn:hover {
-  background: rgba(137, 180, 250, 0.2);
-  color: #cdd6f4;
-}
-
-/* ── Single Shared Dropdown (Appended to body) ── */
-.card-dropdown {
+/* ── Custom Right-Click Context Menu ── */
+.context-menu {
   position: fixed;
-  background: #1e1e2e;
+  background: #181825;
   border: 1px solid #45475a;
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  z-index: 150;
-  min-width: 140px;
-  padding: 4px 0;
-  display: none;
+  border-radius: 9px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
+  z-index: 500;
+  min-width: 210px;
+  padding: 5px 0;
+  user-select: none;
 }
 
-.card-dropdown.open {
-  display: block;
+.context-menu.hidden {
+  display: none !important;
 }
 
-.card-dropdown-item {
+.context-menu-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
+  gap: 11px;
+  padding: 8px 16px;
   font-size: 13px;
   color: #cdd6f4;
   cursor: pointer;
@@ -237,34 +202,44 @@ body {
   width: 100%;
   text-align: left;
   box-sizing: border-box;
+  font-family: inherit;
 }
 
-.card-dropdown-item:hover {
-  background: rgba(137, 180, 250, 0.12);
+.context-menu-item:hover {
+  background: #313244;
+  color: #89b4fa;
 }
 
-.card-dropdown-item.danger {
+.context-menu-item.danger {
   color: #f38ba8;
 }
 
-.card-dropdown-item.danger:hover {
+.context-menu-item.danger:hover {
   background: rgba(243, 139, 168, 0.15);
+  color: #f38ba8;
 }
 
-.card-dropdown-item svg {
+.context-menu-item svg {
   flex-shrink: 0;
   pointer-events: none;
+  color: inherit;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: #313244;
+  margin: 5px 0;
 }
 
 /* ── Delete Confirmation Overlay ── */
 .delete-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  z-index: 600;
 }
 
 .delete-dialog {
@@ -323,7 +298,7 @@ body {
   opacity: 0.85;
 }
 
-/* ── Floating Sync Status Toast ── */
+/* ── Floating Sync Status Toast (Instant show/hide, zero lag) ── */
 .sync-status {
   position: fixed;
   bottom: 24px;
@@ -341,12 +316,10 @@ body {
   z-index: 100;
   pointer-events: none;
   opacity: 1;
-  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 .sync-status.fading {
   opacity: 0;
-  transform: translateY(6px);
 }
 
 .sync-status.success {
@@ -385,7 +358,6 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, transform 0.2s ease;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   padding: 0;
 }
@@ -394,23 +366,17 @@ body {
   color: #cdd6f4;
   border-color: #89b4fa;
   background: #1e1e2e;
-  transform: translateY(-2px);
 }
 
-#settings-btn:hover {
-  transform: rotate(45deg);
-}
-
-/* ── Modal Overlay (Add Bookmark Dialog) ── */
+/* ── Modal Overlay (Zero backdrop-filter blur for potato PCs) ── */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.75);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
-  backdrop-filter: blur(4px);
+  z-index: 600;
 }
 
 .modal-dialog {
@@ -474,7 +440,6 @@ body {
   box-sizing: border-box;
   font-size: 14px;
   font-family: inherit;
-  transition: border-color 0.2s;
 }
 
 .modal-field input:focus,
