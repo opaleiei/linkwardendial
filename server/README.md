@@ -20,12 +20,35 @@ Instead of running a full Linkwarden instance with PostgreSQL, Meilisearch, Redi
 
 ---
 
+## Pull Pre-Built Docker Image
+
+You can pull and run the pre-built multi-architecture image directly from GitHub Container Registry (no build required):
+
+```bash
+docker pull ghcr.io/opaleiei/linkwardendial:latest
+```
+
+Run with `docker run`:
+```bash
+docker run -d \
+  --name mini-linkwarden \
+  -p 3000:3000 \
+  -v $(pwd)/data:/data \
+  -e PORT=3000 \
+  -e API_TOKEN=mysecrettoken \
+  --restart unless-stopped \
+  ghcr.io/opaleiei/linkwardendial:latest
+```
+
+---
+
 ## Quick Start with Docker Compose
 
 1. From the project root, start the container:
    ```bash
    docker compose up -d
    ```
+   *(Pulls `ghcr.io/opaleiei/linkwardendial:latest` or builds locally if specified)*
 2. The server will start on port `3000`.
 3. In Firefox, open the Speed Dial Options page:
    - **Server URL**: `http://localhost:3000` (or `http://YOUR_SERVER_IP:3000`)
@@ -35,18 +58,9 @@ Instead of running a full Linkwarden instance with PostgreSQL, Meilisearch, Redi
 
 ---
 
-## Standalone Docker Command
+## Web Dashboard
 
-```bash
-docker run -d \
-  --name mini-linkwarden \
-  -p 3000:3000 \
-  -v $(pwd)/data:/data \
-  -e PORT=3000 \
-  -e API_TOKEN=mysecrettoken \
-  --restart unless-stopped \
-  $(docker build -q ./server)
-```
+Visit `http://localhost:3000` in your web browser to view the built-in Catppuccin web dashboard with live bookmark counts, connection guide, and a one-click **"Download JSON Backup"** button (`/api/v1/export`).
 
 ---
 

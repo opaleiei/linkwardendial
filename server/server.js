@@ -69,7 +69,7 @@ function parseBody(req) {
     req.on('data', chunk => {
       body += chunk;
       if (body.length > 5 * 1024 * 1024) {
-        req.destroy(); // Protect against massive payloads
+        req.destroy();
       }
     });
     req.on('end', () => {
@@ -107,6 +107,179 @@ async function fetchPageTitle(targetUrl) {
   }
 }
 
+// Dashboard HTML generator
+function renderDashboardHtml(host) {
+  const linksHtml = db.links.length === 0
+    ? '<p style="color: #6c7086; font-style: italic;">No bookmarks saved yet. Use the Linkwarden Speed Dial extension to add bookmarks!</p>'
+    : db.links.map(l => `
+      <div style="background: #181825; border: 1px solid #313244; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 12px; overflow: hidden;">
+          <img src="${l.favIcon || 'https://www.google.com/s2/favicons?domain=' + (new URL(l.url).hostname) + '&sz=32'}" width="20" height="20" style="object-fit: contain;" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌐</text></svg>'">
+          <a href="${l.url}" target="_blank" rel="noopener noreferrer" style="color: #cdd6f4; text-decoration: none; font-weight: 500; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${escapeHtml(l.name || l.url)}</a>
+        </div>
+        <span style="font-size: 11px; color: #6c7086; margin-left: 12px; white-space: nowrap;">ID: ${l.id}</span>
+      </div>
+    `).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mini-Linkwarden Server</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #11111b;
+      color: #cdd6f4;
+      margin: 0;
+      padding: 40px 20px;
+      display: flex;
+      justify-content: center;
+    }
+    .container {
+      max-width: 680px;
+      width: 100%;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      border-bottom: 1px solid #313244;
+      padding-bottom: 16px;
+    }
+    h1 {
+      margin: 0;
+      color: #89b4fa;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .badge {
+      background: rgba(166, 227, 161, 0.15);
+      color: #a6e3a1;
+      border: 1px solid #a6e3a1;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .card {
+      background: #1e1e2e;
+      border: 1px solid #313244;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card h2 {
+      margin-top: 0;
+      margin-bottom: 14px;
+      font-size: 16px;
+      color: #89b4fa;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .stat-box {
+      background: #181825;
+      border: 1px solid #313244;
+      border-radius: 8px;
+      padding: 14px;
+      text-align: center;
+    }
+    .stat-number {
+      font-size: 26px;
+      font-weight: bold;
+      color: #cdd6f4;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #a6adc8;
+      margin-top: 4px;
+    }
+    code {
+      background: #313244;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #f5c2e7;
+    }
+    .btn {
+      display: inline-block;
+      background: #89b4fa;
+      color: #11111b;
+      padding: 8px 16px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      border: none;
+    }
+    .btn:hover {
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🚀 Mini-Linkwarden</h1>
+      <span class="badge">● Online</span>
+    </div>
+
+    <div class="card">
+      <h2>📊 Server Stats</h2>
+      <div class="stats">
+        <div class="stat-box">
+          <div class="stat-number">${db.links.length}</div>
+          <div class="stat-label">Saved Bookmarks</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-number">${db.collections.length}</div>
+          <div class="stat-label">Collections</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <a href="/api/v1/export" class="btn" download>📥 Download JSON Backup</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🔗 Extension Setup Guide</h2>
+      <p style="margin-top: 0; color: #a6adc8; font-size: 14px; line-height: 1.6;">
+        To connect your <strong>Linkwarden Speed Dial</strong> extension to this server:
+      </p>
+      <ol style="color: #cdd6f4; font-size: 14px; line-height: 1.8; margin-bottom: 0; padding-left: 20px;">
+        <li>Open Firefox &rarr; Speed Dial Options (or click ⚙ in bottom-right of new tab).</li>
+        <li>Set <strong>Linkwarden Server URL</strong> to: <code>http://${host || 'localhost:' + PORT}</code></li>
+        <li>Set <strong>API Access Token</strong> to: <code>${API_TOKEN || '(Empty / any string)'}</code></li>
+        <li>Click <strong>Test Connection</strong>, then <strong>Save Settings</strong>.</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h2>🔖 Bookmarks (${db.links.length})</h2>
+      ${linksHtml}
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 // Request dispatcher
 const server = http.createServer(async (req, res) => {
   const reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -132,8 +305,14 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 1. Health check & status
+  // 1. Health check & Web Dashboard
   if (pathname === '/' || pathname === '/health') {
+    const acceptHeader = req.headers['accept'] || '';
+    if (pathname === '/' && acceptHeader.includes('text/html')) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(renderDashboardHtml(req.headers.host));
+    }
+
     return sendJson(res, 200, {
       status: 'ok',
       service: 'mini-linkwarden',
@@ -143,7 +322,17 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // 2. Collections endpoints
+  // 2. Export database
+  if (pathname === '/api/v1/export' && method === 'GET') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Content-Disposition': 'attachment; filename="linkwarden-bookmarks-backup.json"',
+      'Access-Control-Allow-Origin': '*'
+    });
+    return res.end(JSON.stringify(db, null, 2));
+  }
+
+  // 3. Collections endpoints
   // GET /api/v1/collections
   if (pathname === '/api/v1/collections' && method === 'GET') {
     return sendJson(res, 200, { response: db.collections });
@@ -199,7 +388,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { response: removed });
   }
 
-  // 3. Search / Links listing endpoints
+  // 4. Search / Links listing endpoints
   // GET /api/v1/search OR GET /api/v1/links
   if ((pathname === '/api/v1/search' || pathname === '/api/v1/links') && method === 'GET') {
     const colParam = reqUrl.searchParams.get('collectionId');
@@ -218,7 +407,7 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // 4. Create Bookmark
+  // 5. Create Bookmark
   // POST /api/v1/links
   if (pathname === '/api/v1/links' && method === 'POST') {
     const body = await parseBody(req);
@@ -234,13 +423,11 @@ const server = http.createServer(async (req, res) => {
 
     let name = (body.name || '').trim();
     if (!name) {
-      // Auto-fetch title from web page
       const scrapedTitle = await fetchPageTitle(targetUrl);
       name = scrapedTitle || targetUrl;
     }
 
     let collectionId = body.collection && body.collection.id ? parseInt(body.collection.id, 10) : 1;
-    // Verify collection exists, fallback to default
     if (!db.collections.some(c => c.id === collectionId)) {
       collectionId = 1;
     }
@@ -268,7 +455,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { response: newLink, status: 200 });
   }
 
-  // 5. Delete Bookmark
+  // 6. Delete Bookmark
   // DELETE /api/v1/links/:id
   const deleteLinkMatch = pathname.match(/^\/api\/v1\/links\/(\d+)$/);
   if (deleteLinkMatch && method === 'DELETE') {

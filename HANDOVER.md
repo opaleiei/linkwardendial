@@ -121,3 +121,13 @@ This document provides complete architectural and operational context for any de
 - **Folder / Collection Tabs**: Tabbed navigation at top of speed dial to quickly switch between collections without going to Options.
 - **Keyboard Shortcuts**: Quick keyboard navigation or search shortcut (`/` to focus search).
 - **Import/Export Config**: Export dial configuration to JSON backup file and import.
+
+---
+
+## 8. Mini-Linkwarden Docker & CI/CD Pipeline
+
+- **Standalone Docker image**: Built via `server/Dockerfile` using `node:20-alpine`.
+- **Automated CI/CD**: `.github/workflows/docker-publish.yml` automatically builds multi-arch (`linux/amd64`, `linux/arm64`) images and pushes to `ghcr.io/opaleiei/linkwardendial:latest` on every push to `main`.
+- **Pull command**: `docker pull ghcr.io/opaleiei/linkwardendial:latest`
+- **Docker Compose**: `docker compose up -d` uses the pre-built GHCR image with local build fallback.
+

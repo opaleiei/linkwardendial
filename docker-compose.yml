@@ -1,5 +1,6 @@
 services:
   mini-linkwarden:
+    image: ghcr.io/opaleiei/linkwardendial:latest
     build:
       context: ./server
       dockerfile: Dockerfile
