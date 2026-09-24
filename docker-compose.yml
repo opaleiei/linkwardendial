@@ -9,4 +9,4 @@ services:
       - ./data:/data
     environment:
       - PORT=3000
-      - API_TOKEN=mysecrettoken
+      - API_TOKEN=1234

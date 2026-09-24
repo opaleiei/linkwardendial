@@ -95,6 +95,7 @@ This document provides complete architectural and operational context for any de
    - One-click "Reset Dial Order" button.
 7. **Add Bookmark from New Tab**: Floating `+` action button opens a modal allowing users to enter a URL, title, and target collection, posting directly to `POST /api/v1/links`.
 8. **Optimized Large Collection Rendering**: Smooth 60+ FPS even with hundreds of bookmarks.
+9. **Server Web Dashboard Firefox Bookmarks Import**: Built-in modal and API (`POST /api/v1/import/firefox` and `POST /api/v1/import`) to import Firefox bookmarks from Netscape HTML (`bookmarks.html`) or Firefox JSON backup (`bookmarks-*.json`). Supports drag & drop, instant preview, folder-to-collection mapping, merge vs replace modes (preserving speed dial config), and duplicate URL skipping.
 
 ---
 
@@ -109,6 +110,9 @@ This document provides complete architectural and operational context for any de
 | Create bookmark | `POST /api/v1/links` | `{ type: "url", url: string, name?: string, collection?: { id: number } }` |
 | Update bookmark | `PUT /api/v1/links/:id` | `{ id: number, name?: string, url?: string, collection?: { id: number } }` |
 | Delete bookmark | `DELETE /api/v1/links/:id` | Deletes link from Prisma database, file storage, and search index |
+| Export database | `GET /api/v1/export` | Downloads JSON backup of all bookmarks and collections |
+| Import backup | `POST /api/v1/import` | Restores database from Linkwarden / Mini-Linkwarden JSON or Firefox export |
+| Import Firefox bookmarks | `POST /api/v1/import/firefox` | `{ items?: array, html?: string, content?: any, mode?: "merge"|"replace", createCollections?: boolean, targetCollectionId?: number, skipDuplicates?: boolean }` |
 
 ---
 

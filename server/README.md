@@ -63,6 +63,10 @@ docker run -d \
 Visit `http://localhost:3000` in your web browser to view the built-in Catppuccin web dashboard:
 - **📥 Download JSON Backup**: Click "Download JSON Backup" (`/api/v1/export`) to save your entire bookmark database and dial arrangement to a file.
 - **📤 Import Backup**: Click "Import Backup" (`POST /api/v1/import`) and select any previously exported `linkwarden-bookmarks-backup.json` (or `db.json`) file to restore all bookmarks and collections with one click!
+- **🦊 Import Firefox Bookmarks**: Click "Import Firefox Bookmarks" (`POST /api/v1/import/firefox`) to import from Firefox Netscape HTML export (`bookmarks.html`) or Firefox JSON backup:
+  - **Drag & Drop** or select your Firefox export file.
+  - **Auto-Collection Mapping**: Automatically creates Linkwarden collections matching your Firefox bookmark folders (Toolbar, Dev, News, etc.) or allows assigning all to a single collection.
+  - **Merge vs Replace**: Choose to merge non-destructively with existing bookmarks (skipping duplicates) or perform a clean replacement while preserving your speed dial layout config.
 
 ---
 

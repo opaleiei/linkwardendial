@@ -107,8 +107,282 @@ async function fetchPageTitle(targetUrl) {
   }
 }
 
+// Helper: decode HTML entities
+function decodeHtml(str) {
+  if (!str) return '';
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+// Helper: parse Firefox Netscape HTML bookmark format
+function parseFirefoxHtml(html) {
+  const bookmarks = [];
+  const folderStack = [];
+  let pendingFolder = null;
+  let lastItem = null;
+
+  const tokenRegex = /<H3([^>]*)>(.*?)<\/H3>|<DL\b[^>]*>|<\/DL>|<A\s+([^>]+)>(.*?)<\/A>|<DD>(.*?)(?=(?:<DT|<DL|<\/DL|<p|\n|$))/gis;
+
+  let match;
+  while ((match = tokenRegex.exec(html)) !== null) {
+    const raw = match[0];
+    if (/^<H3/i.test(raw)) {
+      pendingFolder = decodeHtml(match[2].trim());
+      lastItem = null;
+    } else if (/^<DL/i.test(raw)) {
+      folderStack.push(pendingFolder || '');
+      pendingFolder = null;
+      lastItem = null;
+    } else if (/^<\/DL/i.test(raw)) {
+      folderStack.pop();
+      lastItem = null;
+    } else if (/^<A/i.test(raw)) {
+      const attrs = match[3];
+      const title = decodeHtml(match[4].trim());
+
+      const hrefMatch = attrs.match(/href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+      const url = hrefMatch ? (hrefMatch[1] || hrefMatch[2] || hrefMatch[3]) : '';
+
+      const iconMatch = attrs.match(/icon\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+      const icon = iconMatch ? (iconMatch[1] || iconMatch[2] || iconMatch[3]) : '';
+
+      let currentFolder = '';
+      for (let i = folderStack.length - 1; i >= 0; i--) {
+        if (folderStack[i]) {
+          currentFolder = folderStack[i];
+          break;
+        }
+      }
+
+      if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+        const item = {
+          name: title || url,
+          url: url,
+          favIcon: icon || null,
+          folder: currentFolder || 'Unorganized',
+          folderPath: folderStack.filter(Boolean),
+          description: ''
+        };
+        bookmarks.push(item);
+        lastItem = item;
+      }
+    } else if (/^<DD/i.test(raw)) {
+      if (lastItem) {
+        lastItem.description = decodeHtml(match[5].trim());
+      }
+    }
+  }
+
+  return bookmarks;
+}
+
+// Helper: parse Firefox JSON backup format
+function parseFirefoxJson(root) {
+  const bookmarks = [];
+
+  function walk(node, folderPath) {
+    if (!node) return;
+
+    const isBookmark = Boolean(node.uri || node.url) && (node.typeCode === 1 || node.type === 'text/x-moz-place' || !node.children);
+    if (isBookmark) {
+      const url = node.uri || node.url;
+      if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+        const currentFolder = folderPath.length > 0 ? folderPath[folderPath.length - 1] : 'Unorganized';
+        bookmarks.push({
+          name: node.title || url,
+          url: url,
+          favIcon: node.iconuri || node.icon || null,
+          folder: currentFolder,
+          folderPath: [...folderPath],
+          description: node.description || ''
+        });
+      }
+      return;
+    }
+
+    const hasChildren = Array.isArray(node.children);
+    const nextPath = [...folderPath];
+    if (node.title && node.title !== 'root' && node.guid !== 'root________') {
+      nextPath.push(node.title.trim());
+    }
+
+    if (hasChildren) {
+      for (const child of node.children) {
+        walk(child, nextPath);
+      }
+    }
+  }
+
+  walk(root, []);
+  return bookmarks;
+}
+
+// Helper: parse any Firefox bookmark data (HTML, JSON, or array)
+function parseFirefoxBookmarks(data) {
+  if (Array.isArray(data)) return data;
+  if (typeof data === 'string') {
+    const trimmed = data.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        return parseFirefoxJson(JSON.parse(trimmed));
+      } catch (_) {}
+    }
+    return parseFirefoxHtml(data);
+  }
+  if (typeof data === 'object' && data !== null) {
+    return parseFirefoxJson(data);
+  }
+  return [];
+}
+
+// Helper: import Firefox bookmarks into database
+function importFirefoxData({ bookmarks, mode = 'merge', createCollections = true, targetCollectionId = 1, skipDuplicates = true }) {
+  if (!Array.isArray(bookmarks) || bookmarks.length === 0) {
+    return {
+      importedCount: 0,
+      collectionsCreated: 0,
+      skippedDuplicates: 0,
+      totalLinks: db.links.length,
+      totalCollections: db.collections.length
+    };
+  }
+
+  const catppuccinColors = [
+    '#89b4fa', '#a6e3a1', '#f9e2af', '#fab387', '#f38ba8',
+    '#cba6f7', '#b4befe', '#74c7ec', '#89dceb', '#94e2d5'
+  ];
+
+  let speedDialConfigCollection = null;
+  if (mode === 'replace') {
+    speedDialConfigCollection = db.collections.find(c => c.name === '⚙️ Speed Dial Config');
+    db.links = [];
+    db.collections = [
+      {
+        id: 1,
+        name: 'Unorganized',
+        description: '',
+        color: '#89b4fa',
+        members: [{ userId: 1, canCreate: true, canUpdate: true, canDelete: true }]
+      }
+    ];
+    if (speedDialConfigCollection) {
+      db.collections.push(speedDialConfigCollection);
+    }
+    db.nextLinkId = 1;
+    db.nextCollectionId = Math.max(...db.collections.map(c => c.id), 1) + 1;
+  }
+
+  const collectionNameMap = new Map();
+  for (const col of db.collections) {
+    collectionNameMap.set(col.name.trim().toLowerCase(), col.id);
+  }
+
+  let collectionsCreated = 0;
+  function getOrCreateCollection(name) {
+    const trimmed = (name || '').trim();
+    if (!trimmed || trimmed.toLowerCase() === 'unorganized') {
+      return 1;
+    }
+    const lower = trimmed.toLowerCase();
+    if (collectionNameMap.has(lower)) {
+      return collectionNameMap.get(lower);
+    }
+    const newId = db.nextCollectionId++;
+    const colColor = catppuccinColors[(db.collections.length) % catppuccinColors.length];
+    const newCol = {
+      id: newId,
+      name: trimmed,
+      description: 'Imported from Firefox',
+      color: colColor,
+      members: [{ userId: 1, canCreate: true, canUpdate: true, canDelete: true }]
+    };
+    db.collections.push(newCol);
+    collectionNameMap.set(lower, newId);
+    collectionsCreated++;
+    return newId;
+  }
+
+  const existingUrls = new Set(
+    mode === 'merge' && skipDuplicates
+      ? db.links.map(l => l.url.trim().toLowerCase())
+      : []
+  );
+
+  let importedCount = 0;
+  let skippedDuplicates = 0;
+
+  for (const item of bookmarks) {
+    const targetUrl = (item.url || '').trim();
+    if (!targetUrl || (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://'))) {
+      continue;
+    }
+
+    const normUrl = targetUrl.toLowerCase();
+    if (mode === 'merge' && skipDuplicates && existingUrls.has(normUrl)) {
+      skippedDuplicates++;
+      continue;
+    }
+
+    let colId = 1;
+    if (createCollections) {
+      colId = getOrCreateCollection(item.folder);
+    } else {
+      colId = parseInt(targetCollectionId, 10) || 1;
+      if (!db.collections.some(c => c.id === colId)) {
+        colId = 1;
+      }
+    }
+
+    let domain = '';
+    try {
+      domain = new URL(targetUrl).hostname;
+    } catch (_) {}
+
+    const newLink = {
+      id: db.nextLinkId++,
+      name: (item.name || targetUrl).trim(),
+      url: targetUrl,
+      description: item.description || '',
+      type: 'url',
+      favIcon: item.favIcon || (domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null),
+      collectionId: colId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    db.links.push(newLink);
+    existingUrls.add(normUrl);
+    importedCount++;
+  }
+
+  saveDb();
+  console.log(`[Mini-Linkwarden] Imported ${importedCount} Firefox bookmarks (${collectionsCreated} collections created, ${skippedDuplicates} duplicates skipped).`);
+
+  return {
+    importedCount,
+    collectionsCreated,
+    skippedDuplicates,
+    totalLinks: db.links.length,
+    totalCollections: db.collections.length
+  };
+}
+
 // Helper: import and normalize backup data
 function importBackupData(payload) {
+  // Case: Firefox JSON backup
+  if (payload && (payload.guid || (payload.type && String(payload.type).includes('moz')) || (payload.children && Array.isArray(payload.children)))) {
+    const ffBookmarks = parseFirefoxJson(payload);
+    const stats = importFirefoxData({ bookmarks: ffBookmarks, mode: 'replace', createCollections: true });
+    return { linksCount: stats.importedCount, collectionsCount: stats.collectionsCreated };
+  }
+
   let importedCollections = [];
   let importedLinks = [];
 
@@ -181,6 +455,11 @@ function importBackupData(payload) {
 
 // Dashboard HTML generator
 function renderDashboardHtml(host) {
+  const collectionOptionsHtml = db.collections
+    .filter(c => c.name !== '⚙️ Speed Dial Config')
+    .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
+    .join('');
+
   const linksHtml = db.links.length === 0
     ? '<p style="color: #6c7086; font-style: italic;">No bookmarks saved yet. Use the Linkwarden Speed Dial extension or click Import Backup below to get started!</p>'
     : db.links.map(l => `
@@ -313,11 +592,105 @@ function renderDashboardHtml(host) {
     .btn.secondary:hover {
       background: #45475a;
     }
+    .btn.firefox-btn {
+      background: linear-gradient(135deg, #ff7139 0%, #e22d64 50%, #902cbe 100%);
+      color: #ffffff;
+      border: none;
+      box-shadow: 0 2px 8px rgba(226, 45, 100, 0.25);
+    }
+    .btn.firefox-btn:hover {
+      opacity: 0.92;
+      filter: brightness(1.08);
+    }
     #importStatus {
       margin-top: 12px;
       font-size: 13px;
       font-weight: 500;
       display: none;
+    }
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 16px;
+      backdrop-filter: blur(3px);
+    }
+    .modal-overlay.active {
+      display: flex;
+    }
+    .modal-card {
+      background: #1e1e2e;
+      border: 1px solid #45475a;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 540px;
+      padding: 24px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+      box-sizing: border-box;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+      border-bottom: 1px solid #313244;
+      padding-bottom: 12px;
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      color: #a6adc8;
+      font-size: 24px;
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+    }
+    .modal-close:hover {
+      color: #f38ba8;
+    }
+    .drop-zone {
+      border: 2px dashed #45475a;
+      border-radius: 10px;
+      padding: 28px 16px;
+      text-align: center;
+      background: #181825;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: #fab387;
+      background: #1e1e2e;
+    }
+    .radio-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #cdd6f4;
+    }
+    .radio-option input[type="radio"], .radio-option input[type="checkbox"] {
+      margin-top: 2px;
+      accent-color: #fab387;
+    }
+    kbd {
+      background: #313244;
+      color: #cdd6f4;
+      border: 1px solid #45475a;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 11px;
+      font-family: inherit;
     }
   </style>
 </head>
@@ -346,6 +719,9 @@ function renderDashboardHtml(host) {
           📤 Import Backup
           <input type="file" id="importFileInput" accept=".json,application/json" style="display: none;">
         </label>
+        <button type="button" class="btn firefox-btn" id="openFirefoxModalBtn" style="cursor: pointer;">
+          🦊 Import Firefox Bookmarks
+        </button>
       </div>
       <div id="importStatus"></div>
     </div>
@@ -369,9 +745,97 @@ function renderDashboardHtml(host) {
         ${linksHtml}
       </div>
     </div>
+
+    <!-- Firefox Import Modal -->
+    <div id="firefoxModal" class="modal-overlay">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 20px;">🦊</span>
+            <h3 style="margin: 0; font-size: 18px; color: #fab387;">Import Firefox Bookmarks</h3>
+          </div>
+          <button type="button" class="modal-close" id="closeFirefoxModal" aria-label="Close modal">&times;</button>
+        </div>
+
+        <!-- Step 1: File Selection -->
+        <div id="ffStepSelect">
+          <div class="drop-zone" id="ffDropZone">
+            <div style="font-size: 36px; margin-bottom: 8px;">📂</div>
+            <p style="margin: 0 0 6px 0; font-weight: 600; font-size: 15px; color: #cdd6f4;">Choose or Drop Firefox Bookmarks File</p>
+            <p style="margin: 0; font-size: 12px; color: #a6adc8;">
+              Supports <code style="color: #fab387;">bookmarks.html</code> (Netscape HTML) or <code style="color: #fab387;">bookmarks-*.json</code>
+            </p>
+            <input type="file" id="ffFileInput" accept=".html,.htm,.json,text/html,application/json" style="display: none;">
+          </div>
+          <div style="background: #181825; border: 1px solid #313244; border-radius: 8px; padding: 12px 14px; margin-top: 14px; font-size: 12px; color: #a6adc8; line-height: 1.6;">
+            <strong style="color: #cdd6f4;">💡 How to export bookmarks in Firefox:</strong><br>
+            1. Press <kbd>Ctrl+Shift+O</kbd> (<kbd>Cmd+Shift+O</kbd> on Mac) to open Library.<br>
+            2. Click <strong>Import and Backup</strong> in the toolbar.<br>
+            3. Click <strong>Export Bookmarks to HTML...</strong> (recommended) or <strong>Backup...</strong>
+          </div>
+        </div>
+
+        <!-- Step 2: File Options -->
+        <div id="ffStepOptions" style="display: none;">
+          <div style="background: #181825; border: 1px solid #313244; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="font-weight: 600; color: #a6e3a1; font-size: 14px;" id="ffFileInfo">✓ Ready</div>
+              <button type="button" class="btn secondary" id="ffChangeFileBtn" style="padding: 4px 10px; font-size: 11px;">Change File</button>
+            </div>
+            <div style="font-size: 12px; color: #a6adc8; margin-top: 5px;" id="ffFoldersInfo">Folders detected</div>
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <label style="font-size: 13px; font-weight: 600; color: #cdd6f4; display: block; margin-bottom: 8px;">Import Mode</label>
+            <label class="radio-option">
+              <input type="radio" name="ffMode" value="merge" checked>
+              <span><strong>Merge</strong> &mdash; Add new bookmarks, keep existing ones (Recommended)</span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="ffMode" value="replace">
+              <span><strong>Replace</strong> &mdash; Clear existing bookmarks and replace with these</span>
+            </label>
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <label style="font-size: 13px; font-weight: 600; color: #cdd6f4; display: block; margin-bottom: 8px;">Collection Organization</label>
+            <label class="radio-option">
+              <input type="radio" name="ffCollections" value="auto" checked>
+              <span>Create collections from Firefox folders (<span id="ffFolderListPreview" style="color: #89b4fa;"></span>)</span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="ffCollections" value="single">
+              <span>Import all bookmarks into one collection:</span>
+              <select id="ffSingleCollectionSelect" style="background: #181825; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; padding: 3px 8px; margin-left: 6px; font-size: 12px;">
+                ${collectionOptionsHtml}
+              </select>
+            </label>
+          </div>
+
+          <div style="margin-bottom: 20px;">
+            <label class="radio-option">
+              <input type="checkbox" id="ffSkipDuplicates" checked>
+              <span>Skip duplicate URLs if they already exist in database</span>
+            </label>
+          </div>
+
+          <div class="btn-row" style="justify-content: flex-end;">
+            <button type="button" class="btn secondary" id="ffCancelBtn">Cancel</button>
+            <button type="button" class="btn firefox-btn" id="ffSubmitBtn">Import Bookmarks</button>
+          </div>
+        </div>
+
+        <!-- Step 3: Result / Loading -->
+        <div id="ffStepResult" style="display: none; text-align: center; padding: 24px 0;">
+          <div id="ffResultSpinner" style="font-size: 34px; margin-bottom: 12px;">⏳</div>
+          <div id="ffResultText" style="font-size: 14px; font-weight: 500; color: #cdd6f4;">Importing bookmarks...</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
+    // Standard Backup Import
     document.getElementById('importFileInput').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -388,7 +852,12 @@ function renderDashboardHtml(host) {
 
       try {
         const text = await file.text();
-        const data = JSON.parse(text);
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (_) {
+          data = { html: text };
+        }
 
         const res = await fetch('/api/v1/import', {
           method: 'POST',
@@ -411,6 +880,282 @@ function renderDashboardHtml(host) {
       } catch (err) {
         statusEl.style.color = '#f38ba8';
         statusEl.textContent = '❌ Error reading file: ' + err.message;
+      }
+    });
+
+    // 🦊 Firefox Bookmark Import Logic
+    let parsedFfBookmarks = [];
+
+    function decodeEntities(str) {
+      if (!str) return '';
+      return str
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&apos;/g, "'")
+        .replace(/&#(\\d+);/g, (_, dec) => String.fromCharCode(dec))
+        .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    }
+
+    function clientParseFirefoxHtml(html) {
+      const bookmarks = [];
+      const folderStack = [];
+      let pendingFolder = null;
+      let lastItem = null;
+
+      const tokenRegex = /<H3([^>]*)>(.*?)<\\/H3>|<DL\\b[^>]*>|<\\/DL>|<A\\s+([^>]+)>(.*?)<\\/A>|<DD>(.*?)(?=(?:<DT|<DL|<\\/DL|<p|\\n|$))/gis;
+
+      let match;
+      while ((match = tokenRegex.exec(html)) !== null) {
+        const raw = match[0];
+        if (/^<H3/i.test(raw)) {
+          pendingFolder = decodeEntities(match[2].trim());
+          lastItem = null;
+        } else if (/^<DL/i.test(raw)) {
+          folderStack.push(pendingFolder || '');
+          pendingFolder = null;
+          lastItem = null;
+        } else if (/^<\\/DL/i.test(raw)) {
+          folderStack.pop();
+          lastItem = null;
+        } else if (/^<A/i.test(raw)) {
+          const attrs = match[3];
+          const title = decodeEntities(match[4].trim());
+
+          const hrefMatch = attrs.match(/href\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))/i);
+          const url = hrefMatch ? (hrefMatch[1] || hrefMatch[2] || hrefMatch[3]) : '';
+
+          const iconMatch = attrs.match(/icon\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))/i);
+          const icon = iconMatch ? (iconMatch[1] || iconMatch[2] || iconMatch[3]) : '';
+
+          let currentFolder = '';
+          for (let i = folderStack.length - 1; i >= 0; i--) {
+            if (folderStack[i]) {
+              currentFolder = folderStack[i];
+              break;
+            }
+          }
+
+          if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+            const item = {
+              name: title || url,
+              url: url,
+              favIcon: icon || null,
+              folder: currentFolder || 'Unorganized',
+              description: ''
+            };
+            bookmarks.push(item);
+            lastItem = item;
+          }
+        } else if (/^<DD/i.test(raw)) {
+          if (lastItem) {
+            lastItem.description = decodeEntities(match[5].trim());
+          }
+        }
+      }
+      return bookmarks;
+    }
+
+    function clientParseFirefoxJson(root) {
+      const bookmarks = [];
+
+      function walk(node, folderPath) {
+        if (!node) return;
+        const isBookmark = Boolean(node.uri || node.url) && (node.typeCode === 1 || node.type === 'text/x-moz-place' || !node.children);
+        if (isBookmark) {
+          const url = node.uri || node.url;
+          if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+            const currentFolder = folderPath.length > 0 ? folderPath[folderPath.length - 1] : 'Unorganized';
+            bookmarks.push({
+              name: node.title || url,
+              url: url,
+              favIcon: node.iconuri || node.icon || null,
+              folder: currentFolder,
+              description: node.description || ''
+            });
+          }
+          return;
+        }
+        const hasChildren = Array.isArray(node.children);
+        const nextPath = [...folderPath];
+        if (node.title && node.title !== 'root' && node.guid !== 'root________') {
+          nextPath.push(node.title.trim());
+        }
+        if (hasChildren) {
+          for (const child of node.children) {
+            walk(child, nextPath);
+          }
+        }
+      }
+
+      walk(root, []);
+      return bookmarks;
+    }
+
+    function parseFileBookmarks(text) {
+      const trimmed = text.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          const json = JSON.parse(trimmed);
+          return clientParseFirefoxJson(json);
+        } catch (_) {}
+      }
+      return clientParseFirefoxHtml(text);
+    }
+
+    const modal = document.getElementById('firefoxModal');
+    const openModalBtn = document.getElementById('openFirefoxModalBtn');
+    const closeModalBtn = document.getElementById('closeFirefoxModal');
+    const cancelBtn = document.getElementById('ffCancelBtn');
+    const changeFileBtn = document.getElementById('ffChangeFileBtn');
+    const submitBtn = document.getElementById('ffSubmitBtn');
+    const dropZone = document.getElementById('ffDropZone');
+    const fileInput = document.getElementById('ffFileInput');
+
+    const stepSelect = document.getElementById('ffStepSelect');
+    const stepOptions = document.getElementById('ffStepOptions');
+    const stepResult = document.getElementById('ffStepResult');
+
+    function openModal() {
+      parsedFfBookmarks = [];
+      fileInput.value = '';
+      stepSelect.style.display = 'block';
+      stepOptions.style.display = 'none';
+      stepResult.style.display = 'none';
+      modal.classList.add('active');
+    }
+
+    function closeModal() {
+      modal.classList.remove('active');
+    }
+
+    openModalBtn.addEventListener('click', openModal);
+    closeModalBtn.addEventListener('click', closeModal);
+    cancelBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+
+    changeFileBtn.addEventListener('click', () => {
+      stepOptions.style.display = 'none';
+      stepSelect.style.display = 'block';
+      fileInput.value = '';
+    });
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        handleFile(e.target.files[0]);
+      }
+    });
+
+    async function handleFile(file) {
+      try {
+        const text = await file.text();
+        const bookmarks = parseFileBookmarks(text);
+
+        if (!bookmarks || bookmarks.length === 0) {
+          alert('Could not find any valid HTTP/HTTPS bookmarks in "' + file.name + '". Please make sure you selected a valid Firefox bookmarks.html or bookmarks-*.json file.');
+          return;
+        }
+
+        parsedFfBookmarks = bookmarks;
+
+        const folders = new Set();
+        bookmarks.forEach(b => {
+          if (b.folder && b.folder !== 'Unorganized') folders.add(b.folder);
+        });
+        const folderList = Array.from(folders);
+
+        document.getElementById('ffFileInfo').textContent = '✓ ' + file.name + ' (' + bookmarks.length + ' bookmarks)';
+        document.getElementById('ffFoldersInfo').textContent = folderList.length > 0
+          ? 'Detected ' + folderList.length + ' folders: ' + folderList.slice(0, 4).join(', ') + (folderList.length > 4 ? ' +' + (folderList.length - 4) + ' more' : '')
+          : 'All bookmarks will be placed in "Unorganized" collection';
+
+        document.getElementById('ffFolderListPreview').textContent = folderList.length > 0
+          ? folderList.length + ' folders detected'
+          : 'no subfolders';
+
+        submitBtn.textContent = 'Import ' + bookmarks.length + ' Bookmarks';
+
+        stepSelect.style.display = 'none';
+        stepOptions.style.display = 'block';
+      } catch (err) {
+        alert('Error reading bookmarks file: ' + err.message);
+      }
+    }
+
+    submitBtn.addEventListener('click', async () => {
+      if (parsedFfBookmarks.length === 0) return;
+
+      const mode = document.querySelector('input[name="ffMode"]:checked').value;
+      const collectionsMode = document.querySelector('input[name="ffCollections"]:checked').value;
+      const targetColId = parseInt(document.getElementById('ffSingleCollectionSelect').value, 10) || 1;
+      const skipDuplicates = document.getElementById('ffSkipDuplicates').checked;
+
+      stepOptions.style.display = 'none';
+      stepResult.style.display = 'block';
+      const resultText = document.getElementById('ffResultText');
+      const resultSpinner = document.getElementById('ffResultSpinner');
+      resultSpinner.textContent = '⏳';
+      resultText.style.color = '#cdd6f4';
+      resultText.textContent = 'Importing ' + parsedFfBookmarks.length + ' bookmarks...';
+
+      try {
+        const res = await fetch('/api/v1/import/firefox', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ${API_TOKEN ? `'Authorization': 'Bearer ${API_TOKEN}'` : "'' : ''"}
+          },
+          body: JSON.stringify({
+            items: parsedFfBookmarks,
+            mode: mode,
+            createCollections: collectionsMode === 'auto',
+            targetCollectionId: targetColId,
+            skipDuplicates: skipDuplicates
+          })
+        });
+
+        const json = await res.json();
+        if (res.ok) {
+          resultSpinner.textContent = '🎉';
+          resultText.style.color = '#a6e3a1';
+          resultText.textContent = '✓ ' + (json.response || 'Bookmarks imported successfully!') + ' Reloading dashboard...';
+          setTimeout(() => window.location.reload(), 1200);
+        } else {
+          resultSpinner.textContent = '❌';
+          resultText.style.color = '#f38ba8';
+          resultText.textContent = 'Error: ' + (json.response || 'Failed to import bookmarks');
+          submitBtn.textContent = 'Retry';
+          setTimeout(() => {
+            stepResult.style.display = 'none';
+            stepOptions.style.display = 'block';
+          }, 2500);
+        }
+      } catch (err) {
+        resultSpinner.textContent = '❌';
+        resultText.style.color = '#f38ba8';
+        resultText.textContent = 'Network or server error: ' + err.message;
+        setTimeout(() => {
+          stepResult.style.display = 'none';
+          stepOptions.style.display = 'block';
+        }, 2500);
       }
     });
   </script>
@@ -481,11 +1226,40 @@ const server = http.createServer(async (req, res) => {
   // 3. Import database / restore backup
   if (pathname === '/api/v1/import' && method === 'POST') {
     const body = await parseBody(req);
-    if (!body || (typeof body !== 'object')) {
-      return sendJson(res, 400, { response: 'Invalid JSON payload for import' });
+    if (!body || (typeof body !== 'object' && typeof body !== 'string')) {
+      return sendJson(res, 400, { response: 'Invalid payload for import' });
     }
 
     try {
+      // Check if it's Firefox format (HTML or JSON)
+      const isFirefoxJson = body && (body.guid || (body.type && String(body.type).includes('moz')) || (body.children && Array.isArray(body.children)));
+      const isFirefoxHtml = typeof body === 'string' || (body && (body.html || body.content));
+
+      if (isFirefoxJson) {
+        const ffBookmarks = parseFirefoxJson(body);
+        const stats = importFirefoxData({ bookmarks: ffBookmarks, mode: 'replace', createCollections: true });
+        return sendJson(res, 200, {
+          response: `Successfully imported ${stats.importedCount} bookmarks and ${stats.collectionsCreated} collections.`,
+          status: 200,
+          linksCount: stats.importedCount,
+          collectionsCount: stats.collectionsCreated
+        });
+      }
+
+      if (isFirefoxHtml && (typeof body === 'string' || body.html || (body.content && String(body.content).includes('<')))) {
+        const htmlStr = typeof body === 'string' ? body : (body.html || body.content);
+        const ffBookmarks = parseFirefoxHtml(htmlStr);
+        if (ffBookmarks.length > 0) {
+          const stats = importFirefoxData({ bookmarks: ffBookmarks, mode: 'replace', createCollections: true });
+          return sendJson(res, 200, {
+            response: `Successfully imported ${stats.importedCount} bookmarks and ${stats.collectionsCreated} collections.`,
+            status: 200,
+            linksCount: stats.importedCount,
+            collectionsCount: stats.collectionsCreated
+          });
+        }
+      }
+
       const stats = importBackupData(body);
       return sendJson(res, 200, {
         response: `Successfully imported ${stats.linksCount} bookmarks and ${stats.collectionsCount} collections.`,
@@ -496,6 +1270,49 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       console.error('[Mini-Linkwarden] Import error:', err);
       return sendJson(res, 500, { response: `Import failed: ${err.message}` });
+    }
+  }
+
+  // 3b. Import Firefox bookmarks
+  if (pathname === '/api/v1/import/firefox' && method === 'POST') {
+    const body = await parseBody(req);
+    const content = body.content || body.html || body.fileContent || body;
+    const mode = body.mode === 'replace' ? 'replace' : 'merge';
+    const createCollections = body.createCollections !== false;
+    const targetCollectionId = body.targetCollectionId || 1;
+    const skipDuplicates = body.skipDuplicates !== false;
+
+    let bookmarks = [];
+    if (Array.isArray(body.items) || Array.isArray(body.bookmarks)) {
+      bookmarks = body.items || body.bookmarks;
+    } else {
+      bookmarks = parseFirefoxBookmarks(content);
+    }
+
+    if (!bookmarks || bookmarks.length === 0) {
+      return sendJson(res, 400, {
+        response: 'No valid bookmarks found in uploaded file. Please make sure it is a valid Firefox bookmarks HTML or JSON file.',
+        status: 400
+      });
+    }
+
+    try {
+      const stats = importFirefoxData({
+        bookmarks,
+        mode,
+        createCollections,
+        targetCollectionId,
+        skipDuplicates
+      });
+
+      return sendJson(res, 200, {
+        response: `Successfully imported ${stats.importedCount} bookmarks (${stats.collectionsCreated} new collections created, ${stats.skippedDuplicates} duplicates skipped).`,
+        status: 200,
+        ...stats
+      });
+    } catch (err) {
+      console.error('[Mini-Linkwarden] Firefox import error:', err);
+      return sendJson(res, 500, { response: `Import failed: ${err.message}`, status: 500 });
     }
   }
 
